@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0b1f33">
-<title>SAFEX · 设备管理</title>
+<title>400C · 设备管理</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%230B5CAD'/><text x='50' y='68' font-size='52' font-weight='bold' fill='white' text-anchor='middle' font-family='Arial'>S</text></svg>">
 <style>
 :root{--navy:#0b1f33;--blue:#0b5cad;--blue2:#2677c9;--bg:#f4f7fb;--card:#fff;--text:#17212b;--muted:#667085;--line:#e3e8ef;--soft:#f8fafc;--ok:#16a36a;--warn:#f59e0b;--danger:#dc3545;--shadow:0 8px 28px rgba(16,36,61,.07)}
@@ -68,7 +68,7 @@ button{touch-action:manipulation}
 <body>
 <div id="headerDiv">
   <div class="header-main">
-    <div id="headerLogo"><div class="logo-icon">S</div><div class="brand-copy"><span class="brand-name">SAFEX</span><span class="subtitle">便携式化学毒气检测仪</span></div></div>
+    <div id="headerLogo"><div class="logo-icon">4</div><div class="brand-copy"><span class="brand-name">400C</span><span class="subtitle">便携式化学毒气检测仪</span></div></div>
     <div id="headerSerial"><span id="deviceSerial">--</span></div>
   </div>
   <div id="headerBtnWrap">
@@ -157,7 +157,7 @@ button{touch-action:manipulation}
       <div class="info-item"><span class="info-label">预警浓度 (ppm)</span><input type="number" id="srcWarnConc" value="50"></div>
     </div><div class="btn-group"><button class="btn btn-primary" onclick="addBleSource()">添加污染源</button></div></div></div>
   </div>
-  <div class="footer">SAFEX Air8000 · Portable Chemical Detector · 2026</div>
+  <div class="footer">400C Air8000 · Portable Chemical Detector · 2026</div>
 </div>
 <script>
 var selectedFile=null,uploadCancelled=false,CHUNK_SIZE=32768;
@@ -202,7 +202,7 @@ function refreshBleSources(){fetch('/ble/sources').then(function(r){return r.jso
 function addBleSource(){var body=JSON.stringify({major:parseInt(document.getElementById('srcMajor').value),type:document.getElementById('srcType').value,rssi_near:parseInt(document.getElementById('srcRssiNear').value),rssi_far:parseInt(document.getElementById('srcRssiFar').value),max_conc:parseInt(document.getElementById('srcMaxConc').value),warn_conc:parseInt(document.getElementById('srcWarnConc').value)});fetch('/ble/sources/add',{method:'POST',headers:{'Content-Type':'application/json'},body:body}).then(function(r){return r.json()}).then(function(data){if(data.ok){log('添加污染源成功: major='+data.source.major,'success');document.getElementById('srcMajor').value='';document.getElementById('srcType').value='';refreshBleSources()}else log('添加失败: '+(data.error||'未知错误'),'warn')}).catch(function(){log('添加请求失败','warn')})}
 function deleteBleSource(major){if(!confirm('确认删除 major='+major+' 的污染源路由？'))return;fetch('/ble/sources/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({major:major})}).then(function(r){return r.json()}).then(function(data){if(data.ok){log('删除污染源成功: major='+major,'success');refreshBleSources()}else log('删除失败: '+(data.error||'未知错误'),'warn')}).catch(function(){log('删除请求失败','warn')})}
 setInterval(function(){var dashboard=document.getElementById('page-dashboard');if(dashboard&&dashboard.classList.contains('active'))refreshDashboard()},5000);
-log('SAFEX Web UI 已加载','info');refreshStatus();refreshDashboard();
+log('400C Web UI 已加载','info');refreshStatus();refreshDashboard();
 </script>
 </body>
 </html>
