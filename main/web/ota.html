@@ -1,0 +1,1488 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Safex - 固件升级</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%23004890'/><text x='50' y='68' font-size='52' font-weight='bold' fill='white' text-anchor='middle' font-family='Arial'>S</text></svg>">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: "Segoe UI", Helvetica, Arial, sans-serif;
+            background-color: #f0f2f5;
+            color: #333;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* ========== Header ========== */
+        #headerDiv {
+            width: 100%;
+            height: 62px;
+            background-color: rgb(0,72,144);
+            color: #fff;
+            display: flex;
+            align-items: center;
+            padding: 0 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+            position: relative;
+            z-index: 100;
+        }
+
+        #headerLogo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        #headerLogo .logo-icon {
+            width: 38px;
+            height: 38px;
+            background: white;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 22px;
+            font-weight: bold;
+            color: rgb(0,72,144);
+        }
+
+        #headerLogo span {
+            font-size: 22px;
+            font-weight: bold;
+            letter-spacing: 2px;
+        }
+
+        #headerLogo .subtitle {
+            font-size: 11px;
+            font-weight: normal;
+            opacity: 0.7;
+            letter-spacing: 0;
+            margin-left: 8px;
+            padding-left: 8px;
+            border-left: 1px solid rgba(255,255,255,0.3);
+        }
+
+        #headerSerial {
+            margin-left: 15px;
+            font-size: 13px;
+            opacity: 0.85;
+        }
+
+        #headerBtnWrap {
+            margin-left: auto;
+            display: flex;
+            gap: 5px;
+        }
+
+        .headerBtn {
+            background: none;
+            border: none;
+            color: #fff;
+            padding: 8px 16px;
+            cursor: pointer;
+            font-size: 14px;
+            letter-spacing: 0.5px;
+            border-left: 1px solid rgba(255,255,255,0.2);
+            transition: background 0.2s;
+        }
+
+        .headerBtn:first-child { border-left: none; margin-left: 20px; }
+        .headerBtn:hover { background: rgba(255,255,255,0.12); }
+        .headerBtn.selected { font-weight: bold; text-decoration: underline; }
+
+        /* ========== Content ========== */
+        #contentWrap {
+            height: calc(100vh - 62px);
+            overflow-y: auto;
+            padding: 30px;
+        }
+
+        .contentWrapper { display: none; }
+        .contentWrapper.active { display: block; }
+
+        /* ========== Cards ========== */
+        .card {
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+            margin-bottom: 20px;
+            overflow: hidden;
+        }
+
+        .card-header {
+            background-color: rgb(0,72,144);
+            color: #fff;
+            padding: 12px 20px;
+            font-size: 15px;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .card-body { padding: 20px; }
+
+        /* ========== OTA Upload ========== */
+        .ota-info-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .info-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 15px;
+            background: #f8f9fa;
+            border-radius: 6px;
+            border-left: 3px solid rgb(0,72,144);
+        }
+
+        .info-label { color: #666; font-size: 13px; }
+        .info-value { font-weight: bold; font-size: 14px; }
+
+        .upload-zone {
+            border: 2px dashed #bbb;
+            border-radius: 8px;
+            padding: 40px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+            background: #fafafa;
+        }
+
+        .upload-zone:hover, .upload-zone.dragover {
+            border-color: rgb(0,72,144);
+            background: #eef3fb;
+        }
+
+        .upload-zone .upload-icon {
+            font-size: 48px;
+            color: rgb(0,72,144);
+            margin-bottom: 10px;
+            display: block;
+        }
+
+        .upload-zone p { color: #666; margin: 5px 0; }
+
+        #fileInput { display: none; }
+
+        .file-info {
+            display: none;
+            background: #eef3fb;
+            border-radius: 6px;
+            padding: 15px;
+            margin: 15px 0;
+            border-left: 3px solid rgb(0,72,144);
+        }
+
+        .file-info.active { display: block; }
+
+        .file-info-row {
+            display: flex;
+            justify-content: space-between;
+            margin: 4px 0;
+            font-size: 13px;
+        }
+
+        .file-info-row .label { color: #666; }
+        .file-info-row .value { font-weight: bold; }
+
+        /* ========== Progress ========== */
+        .progress-wrap {
+            display: none;
+            margin: 20px 0;
+        }
+
+        .progress-wrap.active { display: block; }
+
+        .progress-bar-outer {
+            width: 100%;
+            height: 24px;
+            background: #e0e0e0;
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        .progress-bar-inner {
+            height: 100%;
+            background: linear-gradient(90deg, rgb(0,72,144), rgb(40,120,200));
+            border-radius: 12px;
+            width: 0%;
+            transition: width 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .progress-status {
+            text-align: center;
+            margin-top: 10px;
+            font-size: 14px;
+            color: #666;
+        }
+
+        /* ========== Buttons ========== */
+        .btn {
+            background-color: #fff;
+            border: 1px solid #999;
+            padding: 10px 24px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+            transition: all 0.2s;
+            outline: none;
+        }
+
+        .btn:hover { background-color: #f0f0f0; }
+
+        .btn-primary {
+            background-color: rgb(0,72,144);
+            color: #fff;
+            border-color: rgb(0,72,144);
+        }
+
+        .btn-primary:hover { background-color: rgb(0,60,120); }
+
+        .btn-success {
+            background-color: #27ae60;
+            color: #fff;
+            border-color: #27ae60;
+        }
+
+        .btn-success:hover { background-color: #229954; }
+
+        .btn-danger {
+            background-color: #e74c3c;
+            color: #fff;
+            border-color: #e74c3c;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-group { display: flex; gap: 10px; margin-top: 15px; }
+
+        /* ========== Status Badge ========== */
+        .badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .badge-idle { background: #e0e0e0; color: #666; }
+        .badge-uploading { background: #3498db; color: #fff; }
+        .badge-success { background: #27ae60; color: #fff; }
+        .badge-fail { background: #e74c3c; color: #fff; }
+        .badge-connected { background: #27ae60; color: #fff; }
+        .badge-disconnected { background: #e74c3c; color: #fff; }
+
+        /* ========== Log ========== */
+        .log-area {
+            background: #1e1e1e;
+            color: #ccc;
+            font-family: "Consolas", "Courier New", monospace;
+            font-size: 12px;
+            padding: 15px;
+            border-radius: 6px;
+            height: 200px;
+            overflow-y: auto;
+            margin-top: 15px;
+        }
+
+        .log-area .log-line { margin: 2px 0; }
+        .log-area .log-info { color: #6db4ff; }
+        .log-area .log-warn { color: #f0ad4e; }
+        .log-area .log-error { color: #ff6b6b; }
+        .log-area .log-success { color: #5cb85c; }
+
+        /* ========== Dashboard ========== */
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+        }
+
+        .stat-card {
+            background: #fff;
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+            border-top: 3px solid rgb(0,72,144);
+        }
+
+        .stat-card .stat-icon { font-size: 32px; color: rgb(0,72,144); margin-bottom: 10px; }
+        .stat-card .stat-value { font-size: 24px; font-weight: bold; color: #333; }
+        .stat-card .stat-label { font-size: 13px; color: #999; margin-top: 5px; }
+
+        /* ========== Footer ========== */
+        .footer {
+            text-align: center;
+            padding: 15px;
+            color: #999;
+            font-size: 12px;
+        }
+
+        /* ========== Responsive ========== */
+        @media (max-width: 800px) {
+            #headerBtnWrap { display: none; }
+            #headerLogo .subtitle { display: none; }
+            .ota-info-grid { grid-template-columns: 1fr; }
+            .dashboard-grid { grid-template-columns: 1fr; }
+            #contentWrap { padding: 15px; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- ========== Header ========== -->
+<div id="headerDiv">
+    <div id="headerLogo">
+        <div class="logo-icon">S</div>
+        <span>SAFEX</span>
+        <span class="subtitle">便携式化学毒气检测仪</span>
+    </div>
+    <div id="headerSerial">
+        <span id="deviceSerial">--</span>
+    </div>
+    <div id="headerBtnWrap">
+        <button class="headerBtn selected" onclick="showPage('dashboard')">仪表盘</button>
+        <button class="headerBtn" onclick="showPage('ota')">OTA升级</button>
+        <button class="headerBtn" onclick="showPage('blesources')">污染源</button>
+        <button class="headerBtn" onclick="showPage('deviceinfo')">设备信息</button>
+    </div>
+</div>
+
+<!-- ========== Content ========== -->
+<div id="contentWrap">
+
+    <!-- ===== Dashboard ===== -->
+    <div id="page-dashboard" class="contentWrapper active">
+        <div class="dashboard-grid">
+            <div class="stat-card">
+                <div class="stat-icon">&#128268;</div>
+                <div class="stat-value" id="dashMqtt">--</div>
+                <div class="stat-label">MQTT 连接</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon">&#128225;</div>
+                <div class="stat-value" id="dashBle">--</div>
+                <div class="stat-label">BLE 设备数</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon">&#128205;</div>
+                <div class="stat-value" id="dashGnss">--</div>
+                <div class="stat-label">GNSS 定位</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon">&#9889;</div>
+                <div class="stat-value" id="dashGsensor">--</div>
+                <div class="stat-label">跌倒检测</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon">&#128337;</div>
+                <div class="stat-value" id="dashUptime">--</div>
+                <div class="stat-label">运行时间</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon">&#128187;</div>
+                <div class="stat-value" id="dashMem">--</div>
+                <div class="stat-label">内存使用</div>
+            </div>
+        </div>
+        <div class="card" style="margin-top:20px;">
+            <div class="card-header">&#128221; 系统日志</div>
+            <div class="card-body">
+                <div class="log-area" id="dashLog"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== OTA Page ===== -->
+    <div id="page-ota" class="contentWrapper">
+        <div class="card">
+            <div class="card-header">&#128230; 固件信息</div>
+            <div class="card-body">
+                <div class="ota-info-grid">
+                    <div class="info-item">
+                        <span class="info-label">当前版本</span>
+                        <span class="info-value" id="curVersion">--</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">设备ID</span>
+                        <span class="info-value" id="deviceId">--</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">升级状态</span>
+                        <span class="badge badge-idle" id="otaStatusBadge">空闲</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">设备地址</span>
+                        <span class="info-value" id="deviceIp">--</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">&#8682; 固件上传</div>
+            <div class="card-body">
+                <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
+                    <div style="font-size:48px;">&#8682;</div>
+                    <p style="font-size:16px; font-weight:bold; color:#333;">点击选择固件文件 或拖拽到此处</p>
+                    <p style="font-size:13px;">支持 .bin 格式固件包</p>
+                </div>
+                <input type="file" id="fileInput" accept=".bin,.pac">
+
+                <div class="file-info" id="fileInfo">
+                    <div class="file-info-row">
+                        <span class="label">文件名:</span>
+                        <span class="value" id="fileName">--</span>
+                    </div>
+                    <div class="file-info-row">
+                        <span class="label">文件大小:</span>
+                        <span class="value" id="fileSize">--</span>
+                    </div>
+                    <div class="file-info-row">
+                        <span class="label">文件类型:</span>
+                        <span class="value" id="fileType">--</span>
+                    </div>
+                </div>
+
+                <div class="progress-wrap" id="progressWrap">
+                    <div class="progress-bar-outer">
+                        <div class="progress-bar-inner" id="progressBar">0%</div>
+                    </div>
+                    <div class="progress-status" id="progressStatus">准备上传...</div>
+                </div>
+
+                <div class="btn-group">
+                    <button class="btn btn-primary" id="uploadBtn" onclick="startUpload()" disabled>开始升级</button>
+                    <button class="btn btn-danger" id="cancelBtn" onclick="cancelUpload()" style="display:none;">取消</button>
+                    <button class="btn" onclick="refreshStatus()">刷新状态</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">&#128421; 屏幕固件升级</div>
+            <div class="card-body">
+                <p style="color:#666; font-size:13px; margin-bottom:15px;">
+                    上传 .tft 固件文件升级陶晶驰串口屏（约2MB，升级时屏幕会暂停显示）
+                </p>
+                <div class="upload-zone" id="screenUploadZone" onclick="document.getElementById('screenFileInput').click()">
+                    <div style="font-size:48px;">&#128421;</div>
+                    <p style="font-size:16px; font-weight:bold; color:#333;">点击选择 .tft 文件 或拖拽到此处</p>
+                    <p style="font-size:13px;">支持 .tft 格式屏幕固件</p>
+                </div>
+                <input type="file" id="screenFileInput" accept=".tft">
+
+                <div class="file-info" id="screenFileInfo">
+                    <div class="file-info-row">
+                        <span class="label">文件名:</span>
+                        <span class="value" id="screenFileName">--</span>
+                    </div>
+                    <div class="file-info-row">
+                        <span class="label">文件大小:</span>
+                        <span class="value" id="screenFileSize">--</span>
+                    </div>
+                </div>
+
+                <div class="progress-wrap" id="screenProgressWrap">
+                    <div class="progress-bar-outer">
+                        <div class="progress-bar-inner" id="screenProgressBar">0%</div>
+                    </div>
+                    <div class="progress-status" id="screenProgressStatus">准备升级...</div>
+                </div>
+
+                <div class="btn-group">
+                    <button class="btn btn-primary" id="screenUploadBtn" onclick="startScreenUpload()" disabled>开始屏幕升级</button>
+                    <button class="btn btn-danger" id="screenCancelBtn" onclick="cancelScreenUpload()" style="display:none;">取消</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">&#128193; 文件透传到屏幕SD卡</div>
+            <div class="card-body">
+                <p style="color:#666; font-size:13px; margin-bottom:15px;">
+                    上传 .ebs 压缩包，自动解压并逐个传输到 SD 卡根目录 (sd0/)
+                </p>
+                <div class="upload-zone" id="fileTransferZone" onclick="document.getElementById('fileTransferInput').click()">
+                    <div style="font-size:48px;">&#128230;</div>
+                    <p style="font-size:16px; font-weight:bold; color:#333;">点击选择 .ebs 文件 或拖拽到此处</p>
+                    <p style="font-size:13px;">使用 MyZip 工具打包的 .ebs 压缩文件</p>
+                </div>
+                <input type="file" id="fileTransferInput" accept=".ebs">
+
+                <div class="file-info" id="fileTransferInfo">
+                    <div class="file-info-row">
+                        <span class="label">压缩包:</span>
+                        <span class="value" id="fileTransferName">--</span>
+                    </div>
+                    <div class="file-info-row">
+                        <span class="label">包含文件:</span>
+                        <span class="value" id="fileTransferSize">--</span>
+                    </div>
+                    <div id="ebsFileList" style="margin-top:8px;max-height:120px;overflow-y:auto;font-size:12px;color:#666;"></div>
+                </div>
+
+                <div class="progress-wrap" id="fileTransferProgressWrap">
+                    <div class="progress-bar-outer">
+                        <div class="progress-bar-inner" id="fileTransferProgressBar">0%</div>
+                    </div>
+                    <div class="progress-status" id="fileTransferProgressStatus">准备传输...</div>
+                </div>
+
+                <div class="btn-group">
+                    <button class="btn btn-primary" id="fileTransferBtn" onclick="startFileTransfer()" disabled>开始传输</button>
+                    <button class="btn btn-danger" id="fileTransferCancelBtn" onclick="cancelFileTransfer()" style="display:none;">取消</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">&#128221; 升级日志</div>
+            <div class="card-body">
+                <div class="log-area" id="otaLog"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== Device Info ===== -->
+    <div id="page-deviceinfo" class="contentWrapper">
+        <div class="card">
+            <div class="card-header">&#8505; 设备信息</div>
+            <div class="card-body">
+                <div class="ota-info-grid">
+                    <div class="info-item">
+                        <span class="info-label">设备ID (IMEI)</span>
+                        <span class="info-value" id="infoDeviceId">--</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">固件版本</span>
+                        <span class="info-value" id="infoVersion">--</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">运行时间</span>
+                        <span class="info-value" id="infoUptime">--</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">NTP同步</span>
+                        <span class="info-value" id="infoNtp">--</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">MQTT服务器</span>
+                        <span class="info-value" id="infoMqttServer">--</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">MQTT状态</span>
+                        <span class="info-value" id="infoMqttStatus">--</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">BLE开关</span>
+                        <span class="info-value" id="infoBleEn">--</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">GNSS开关</span>
+                        <span class="info-value" id="infoGnssEn">--</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== BLE Pollution Sources ===== -->
+    <div id="page-blesources" class="contentWrapper">
+        <div class="card">
+            <div class="card-header">&#128165; 蓝牙污染源路由表</div>
+            <div class="card-body">
+                <p style="margin-bottom:15px;color:#666;font-size:13px;">管理 iBeacon 污染源路由（按 Major 匹配）。预置 9 种毒剂，可增删改。</p>
+                <div id="bleSourcesList" style="margin-bottom:20px;">
+                    <p style="color:#999;">加载中...</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">&#10133; 添加污染源</div>
+            <div class="card-body">
+                <div class="ota-info-grid" style="grid-template-columns:repeat(2,1fr);gap:12px;">
+                    <div class="info-item">
+                        <span class="info-label">Major (数字)</span>
+                        <input type="number" id="srcMajor" placeholder="如 1" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:14px;">
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">类型描述</span>
+                        <input type="text" id="srcType" placeholder="如 沙林毒剂" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:14px;">
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">近距 RSSI (dBm)</span>
+                        <input type="number" id="srcRssiNear" value="-30" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:14px;">
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">远距 RSSI (dBm)</span>
+                        <input type="number" id="srcRssiFar" value="-80" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:14px;">
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">最大浓度 (ppm)</span>
+                        <input type="number" id="srcMaxConc" value="100" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:14px;">
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">预警浓度 (ppm)</span>
+                        <input type="number" id="srcWarnConc" value="50" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:14px;">
+                    </div>
+                </div>
+                <button class="btn btn-primary" onclick="addBleSource()" style="margin-top:15px;">添加</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="footer">Safex Air8000 &copy; 2026 &middot; 便携式化学毒气检测仪</div>
+
+</div>
+
+<script>
+var selectedFile = null;
+var uploadCancelled = false;
+var CHUNK_SIZE = 32768; // 32KB 分块，httpsrv body 限制 64KB
+
+// ========== Page Navigation ==========
+function showPage(pageId) {
+    document.querySelectorAll('.contentWrapper').forEach(function(el) {
+        el.classList.remove('active');
+    });
+    document.querySelectorAll('.headerBtn').forEach(function(el) {
+        el.classList.remove('selected');
+    });
+    document.getElementById('page-' + pageId).classList.add('active');
+    event.target.classList.add('selected');
+
+    if (pageId === 'dashboard') refreshDashboard();
+    if (pageId === 'ota') refreshStatus();
+    if (pageId === 'blesources') refreshBleSources();
+    if (pageId === 'deviceinfo') refreshDeviceInfo();
+}
+
+// ========== Logging ==========
+function escapeHtml(str) {
+    var div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
+function log(msg, level) {
+    var time = new Date().toLocaleTimeString('zh-CN', {hour12: false});
+    var cls = level || 'info';
+    var logArea = document.getElementById('otaLog') || document.getElementById('dashLog');
+    if (!logArea) return;
+    var line = document.createElement('div');
+    line.className = 'log-line log-' + cls;
+    line.textContent = '[' + time + '] ' + msg;
+    logArea.appendChild(line);
+    logArea.scrollTop = logArea.scrollHeight;
+}
+
+// ========== File Selection ==========
+var uploadZone = document.getElementById('uploadZone');
+
+uploadZone.addEventListener('dragover', function(e) {
+    e.preventDefault();
+    uploadZone.classList.add('dragover');
+});
+
+uploadZone.addEventListener('dragleave', function(e) {
+    e.preventDefault();
+    uploadZone.classList.remove('dragover');
+});
+
+uploadZone.addEventListener('drop', function(e) {
+    e.preventDefault();
+    uploadZone.classList.remove('dragover');
+    if (e.dataTransfer.files.length > 0) {
+        handleFileSelect(e.dataTransfer.files[0]);
+    }
+});
+
+document.getElementById('fileInput').addEventListener('change', function(e) {
+    if (e.target.files.length > 0) {
+        handleFileSelect(e.target.files[0]);
+    }
+});
+
+function handleFileSelect(file) {
+    selectedFile = file;
+    var info = document.getElementById('fileInfo');
+    info.classList.add('active');
+    document.getElementById('fileName').textContent = file.name;
+    document.getElementById('fileSize').textContent = formatSize(file.size);
+    document.getElementById('fileType').textContent = file.name.split('.').pop().toUpperCase();
+    document.getElementById('uploadBtn').disabled = false;
+    log('已选择文件: ' + file.name + ' (' + formatSize(file.size) + ')', 'info');
+}
+
+function formatSize(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / 1048576).toFixed(2) + ' MB';
+}
+
+// ========== Upload (分块上传) ==========
+function startUpload() {
+    if (!selectedFile) return;
+
+    uploadCancelled = false;
+    document.getElementById('uploadBtn').disabled = true;
+    document.getElementById('cancelBtn').style.display = 'inline-block';
+    document.getElementById('progressWrap').classList.add('active');
+    setOtaStatus('uploading');
+
+    var totalChunks = Math.ceil(selectedFile.size / CHUNK_SIZE);
+    log('开始分块上传: ' + selectedFile.name, 'info');
+    log('文件大小: ' + formatSize(selectedFile.size) + ', 分块数: ' + totalChunks + ' (每块 ' + formatSize(CHUNK_SIZE) + ')', 'info');
+
+    // 步骤 1: POST /ota/begin 初始化 FOTA
+    document.getElementById('progressStatus').textContent = '初始化 FOTA...';
+    fetch('/ota/begin', {method: 'POST'})
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (!data.ok) throw new Error(data.error || '初始化失败');
+            log('FOTA 初始化中...', 'info');
+            // 步骤 2: 轮询等待 ready
+            return waitForReady();
+        })
+        .then(function() {
+            log('FOTA 就绪, 开始上传分块', 'success');
+            // 步骤 3: 逐块上传
+            return uploadChunks(0, totalChunks);
+        })
+        .then(function() {
+            log('全部分块上传完成, 等待校验...', 'success');
+            document.getElementById('progressStatus').textContent = '校验中...';
+            // 步骤 4: 轮询最终状态
+            return pollOtaStatus();
+        })
+        .catch(function(err) {
+            if (uploadCancelled) {
+                log('上传已取消', 'warn');
+                document.getElementById('progressStatus').textContent = '已取消';
+                // 通知设备取消
+                fetch('/ota/cancel', {method: 'POST'}).catch(function() {});
+            } else {
+                log('上传失败: ' + (err.message || err), 'error');
+                setOtaStatus('fail');
+                document.getElementById('progressStatus').textContent = '升级失败: ' + (err.message || err);
+            }
+            resetButtons();
+        });
+}
+
+// 等待 FOTA 初始化完成 (state == ready)
+function waitForReady() {
+    return new Promise(function(resolve, reject) {
+        var count = 0;
+        var timer = setInterval(function() {
+            if (uploadCancelled) {
+                clearInterval(timer);
+                reject(new Error('cancelled'));
+                return;
+            }
+            count++;
+            fetch('/ota/status')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.state === 'ready') {
+                        clearInterval(timer);
+                        resolve();
+                    } else if (data.state === 'fail') {
+                        clearInterval(timer);
+                        reject(new Error(data.error_msg || 'FOTA初始化失败'));
+                    } else if (count > 50) {
+                        clearInterval(timer);
+                        reject(new Error('等待FOTA初始化超时'));
+                    }
+                })
+                .catch(function() {
+                    if (count > 50) {
+                        clearInterval(timer);
+                        reject(new Error('网络错误'));
+                    }
+                });
+        }, 200);
+    });
+}
+
+// 递归上传分块
+function uploadChunks(index, totalChunks) {
+    if (uploadCancelled) return Promise.reject(new Error('cancelled'));
+    if (index >= totalChunks) return Promise.resolve();
+
+    var start = index * CHUNK_SIZE;
+    var end = Math.min(start + CHUNK_SIZE, selectedFile.size);
+    var chunk = selectedFile.slice(start, end);
+
+    return fetch('/ota/chunk', {
+        method: 'POST',
+        body: chunk,
+        headers: {'Content-Type': 'application/octet-stream'}
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (!data.ok) throw new Error(data.error || '写入失败');
+
+        // 更新进度 (上传阶段占 0-80%)
+        var percent = Math.round((end / selectedFile.size) * 80);
+        document.getElementById('progressBar').style.width = percent + '%';
+        document.getElementById('progressBar').textContent = percent + '%';
+        document.getElementById('progressStatus').textContent =
+            '上传中... ' + (index + 1) + '/' + totalChunks +
+            ' (' + formatSize(end) + ' / ' + formatSize(selectedFile.size) + ')';
+
+        if (data.done) {
+            // 设备返回 isDone=true，说明所有数据已收完
+            log('设备已收到完整固件 (第' + (index + 1) + '块触发完成)', 'success');
+            return;
+        }
+
+        // 继续下一块
+        return uploadChunks(index + 1, totalChunks);
+    });
+}
+
+function cancelUpload() {
+    uploadCancelled = true;
+    log('正在取消上传...', 'warn');
+    document.getElementById('progressStatus').textContent = '已取消';
+    resetButtons();
+    setOtaStatus('idle');
+}
+
+function resetButtons() {
+    document.getElementById('uploadBtn').disabled = false;
+    document.getElementById('cancelBtn').style.display = 'none';
+}
+
+// ========== OTA Status ==========
+function setOtaStatus(status) {
+    var badge = document.getElementById('otaStatusBadge');
+    badge.className = 'badge';
+    switch(status) {
+        case 'idle': badge.classList.add('badge-idle'); badge.textContent = '空闲'; break;
+        case 'initializing': badge.classList.add('badge-uploading'); badge.textContent = '初始化中'; break;
+        case 'ready': badge.classList.add('badge-uploading'); badge.textContent = '就绪'; break;
+        case 'uploading': badge.classList.add('badge-uploading'); badge.textContent = '上传中'; break;
+        case 'writing': badge.classList.add('badge-uploading'); badge.textContent = '写入中'; break;
+        case 'verifying': badge.classList.add('badge-uploading'); badge.textContent = '校验中'; break;
+        case 'success': badge.classList.add('badge-success'); badge.textContent = '升级成功'; break;
+        case 'fail': badge.classList.add('badge-fail'); badge.textContent = '升级失败'; break;
+    }
+}
+
+function pollOtaStatus() {
+    return new Promise(function(resolve, reject) {
+        var count = 0;
+        var pollTimer = setInterval(function() {
+            count++;
+            fetch('/ota/status')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    var pct = data.progress || 0;
+                    document.getElementById('progressBar').style.width = pct + '%';
+                    document.getElementById('progressBar').textContent = pct + '%';
+
+                    if (data.state === 'success') {
+                        clearInterval(pollTimer);
+                        setOtaStatus('success');
+                        document.getElementById('progressStatus').textContent = '升级成功! 设备即将重启...';
+                        log('升级成功! 设备即将重启', 'success');
+                        setTimeout(function() { location.reload(); }, 5000);
+                        resolve();
+                    } else if (data.state === 'fail') {
+                        clearInterval(pollTimer);
+                        setOtaStatus('fail');
+                        document.getElementById('progressStatus').textContent = '升级失败: ' + (data.error_msg || '未知错误');
+                        log('升级失败: ' + (data.error_msg || '未知错误'), 'error');
+                        resetButtons();
+                        reject(new Error(data.error_msg || '升级失败'));
+                    } else if (data.state === 'verifying') {
+                        document.getElementById('progressStatus').textContent = '校验中... ' + pct + '%';
+                    }
+                })
+                .catch(function() {
+                    // 设备可能正在重启，继续轮询
+                    if (count > 60) {
+                        clearInterval(pollTimer);
+                        log('状态查询超时，设备可能正在重启', 'warn');
+                        resetButtons();
+                        resolve(); // 不当错误处理，可能已重启
+                    }
+                });
+        }, 1000);
+    });
+}
+
+// ========== Refresh Status ==========
+function refreshStatus() {
+    fetch('/ota/status')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            document.getElementById('curVersion').textContent = data.version || '--';
+            document.getElementById('deviceId').textContent = data.device_id || '--';
+            if (data.state) setOtaStatus(data.state);
+        })
+        .catch(function() {
+            log('无法获取设备状态', 'warn');
+        });
+
+    fetch('/sysinfo')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            document.getElementById('deviceIp').textContent = data.ip || '--';
+            document.getElementById('deviceSerial').textContent = data.device_id || '--';
+            if (data.lua_free_kb) updateChunkSize(data.lua_free_kb);
+        })
+        .catch(function() {});
+}
+
+// ========== Dashboard ==========
+function refreshDashboard() {
+    fetch('/sysinfo')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            document.getElementById('deviceSerial').textContent = data.device_id || '--';
+            document.getElementById('dashMqtt').textContent = data.mqtt_connected ? '已连接' : '未连接';
+            document.getElementById('dashBle').textContent = data.ble_count || 0;
+            document.getElementById('dashGnss').textContent = data.gnss_fixed ? '已定位' : '未定位';
+            document.getElementById('dashGsensor').textContent = data.fall_detected ? '跌倒!' : '正常';
+            document.getElementById('dashUptime').textContent = formatUptime(data.uptime || 0);
+            document.getElementById('dashMem').textContent = data.mem_usage || '--';
+        })
+        .catch(function() {
+            log('无法获取仪表盘数据', 'warn');
+        });
+}
+
+function formatUptime(sec) {
+    var h = Math.floor(sec / 3600);
+    var m = Math.floor((sec % 3600) / 60);
+    var s = sec % 60;
+    return h + 'h ' + m + 'm ' + s + 's';
+}
+
+// ========== Device Info ==========
+function refreshDeviceInfo() {
+    fetch('/sysinfo')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            document.getElementById('infoDeviceId').textContent = data.device_id || '--';
+            document.getElementById('infoVersion').textContent = data.version || '--';
+            document.getElementById('infoUptime').textContent = formatUptime(data.uptime || 0);
+            document.getElementById('infoNtp').textContent = data.ntp_synced ? '已同步' : '未同步';
+            document.getElementById('infoMqttServer').textContent = data.mqtt_server || '--';
+            document.getElementById('infoMqttStatus').textContent = data.mqtt_connected ? '已连接' : '未连接';
+            document.getElementById('infoBleEn').textContent = data.ble_en ? '开启' : '关闭';
+            document.getElementById('infoGnssEn').textContent = data.gnss_en ? '开启' : '关闭';
+        })
+        .catch(function() {});
+}
+
+// ========== Screen OTA (异步轮询模式) ==========
+var screenFile = null;
+var screenUploadCancelled = false;
+var SCREEN_CHUNK_SIZE = 16384; // 默认16KB，根据设备空余内存动态调整
+
+// 根据设备空余内存动态调整分块大小
+function updateChunkSize(free_kb) {
+    if (free_kb > 2048) SCREEN_CHUNK_SIZE = 65536;      // >2MB: 64KB
+    else if (free_kb > 1024) SCREEN_CHUNK_SIZE = 32768;  // >1MB: 32KB
+    else if (free_kb > 512) SCREEN_CHUNK_SIZE = 16384;   // >512KB: 16KB
+    else SCREEN_CHUNK_SIZE = 8192;                        // 保守: 8KB
+    log('分块大小: ' + (SCREEN_CHUNK_SIZE / 1024) + 'KB (空余' + free_kb + 'KB)', 'info');
+    FILE_CHUNK_SIZE = SCREEN_CHUNK_SIZE;
+}
+
+var screenUploadZone = document.getElementById('screenUploadZone');
+screenUploadZone.addEventListener('dragover', function(e) { e.preventDefault(); screenUploadZone.classList.add('dragover'); });
+screenUploadZone.addEventListener('dragleave', function(e) { e.preventDefault(); screenUploadZone.classList.remove('dragover'); });
+screenUploadZone.addEventListener('drop', function(e) {
+    e.preventDefault(); screenUploadZone.classList.remove('dragover');
+    if (e.dataTransfer.files.length > 0) handleScreenFileSelect(e.dataTransfer.files[0]);
+});
+document.getElementById('screenFileInput').addEventListener('change', function(e) {
+    if (e.target.files.length > 0) handleScreenFileSelect(e.target.files[0]);
+});
+
+function handleScreenFileSelect(file) {
+    screenFile = file;
+    document.getElementById('screenFileInfo').classList.add('active');
+    document.getElementById('screenFileName').textContent = file.name;
+    document.getElementById('screenFileSize').textContent = formatSize(file.size);
+    document.getElementById('screenUploadBtn').disabled = false;
+    log('已选择屏幕固件: ' + file.name + ' (' + formatSize(file.size) + ')', 'info');
+}
+
+// 轮询直到 pending=false
+function pollScreenOtaStatus(timeout, interval) {
+    var pollInterval = interval || 200;
+    return new Promise(function(resolve, reject) {
+        var count = 0;
+        var maxCount = timeout || 200;
+        var timer = setInterval(function() {
+            if (screenUploadCancelled) { clearInterval(timer); reject(new Error('cancelled')); return; }
+            count++;
+            fetch('/screen_ota/status')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (!data.pending) {
+                        clearInterval(timer);
+                        resolve(data);
+                    } else if (count > maxCount) {
+                        clearInterval(timer);
+                        reject(new Error('超时'));
+                    }
+                })
+                .catch(function() {
+                    if (count > maxCount) {
+                        clearInterval(timer);
+                        reject(new Error('网络错误'));
+                    }
+                });
+        }, pollInterval);
+    });
+}
+
+function startScreenUpload() {
+    if (!screenFile) return;
+    screenUploadCancelled = false;
+    document.getElementById('screenUploadBtn').disabled = true;
+    document.getElementById('screenCancelBtn').style.display = 'inline-block';
+    document.getElementById('screenProgressWrap').classList.add('active');
+
+    var totalChunks = Math.ceil(screenFile.size / SCREEN_CHUNK_SIZE);
+    log('开始屏幕固件升级: ' + screenFile.name, 'info');
+    log('文件大小: ' + formatSize(screenFile.size) + ', 分块数: ' + totalChunks, 'info');
+
+    document.getElementById('screenProgressStatus').textContent = '正在联机屏幕...';
+    fetch('/screen_ota/begin', { method: 'POST', body: String(screenFile.size) })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (!data.ok) throw new Error(data.error || '启动失败');
+            return pollScreenOtaStatus(200);
+        })
+        .then(function(data) {
+            if (!data.ok) throw new Error(data.err || '联机失败');
+            if (data.state !== 'uploading') throw new Error('状态错误: ' + data.state);
+            log('屏幕联机成功, 开始传输固件', 'success');
+            return uploadScreenChunks(0, totalChunks);
+        })
+        .then(function() {
+            log('固件传输完成, 正在完成升级...', 'success');
+            document.getElementById('screenProgressStatus').textContent = '完成中...';
+            return fetch('/screen_ota/finish', { method: 'POST' }).then(function(r) { return r.json(); });
+        })
+        .then(function() { return pollScreenOtaStatus(100); })
+        .then(function(data) {
+            if (data.ok) {
+                log('屏幕固件升级成功!', 'success');
+                document.getElementById('screenProgressStatus').textContent = '升级成功! 屏幕将重启';
+                document.getElementById('screenProgressBar').style.width = '100%';
+                document.getElementById('screenProgressBar').textContent = '100%';
+            } else {
+                throw new Error(data.err || '升级失败');
+            }
+            resetScreenButtons();
+        })
+        .catch(function(err) {
+            if (screenUploadCancelled) {
+                log('屏幕升级已取消', 'warn');
+                fetch('/screen_ota/cancel', { method: 'POST' }).catch(function() {});
+            } else {
+                log('屏幕升级失败: ' + (err.message || err), 'error');
+                document.getElementById('screenProgressStatus').textContent = '升级失败: ' + (err.message || err);
+            }
+            resetScreenButtons();
+        });
+}
+
+function uploadScreenChunks(index, totalChunks) {
+    if (screenUploadCancelled) return Promise.reject(new Error('cancelled'));
+    if (index >= totalChunks) return Promise.resolve();
+    var start = index * SCREEN_CHUNK_SIZE;
+    var end = Math.min(start + SCREEN_CHUNK_SIZE, screenFile.size);
+    var chunk = screenFile.slice(start, end);
+    return fetch('/screen_ota/chunk', { method: 'POST', body: chunk, headers: {'Content-Type': 'application/octet-stream'} })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (!data.ok && !data.pending) throw new Error(data.error || '传输失败');
+            return pollScreenOtaStatus(200, Math.max(200, Math.round(SCREEN_CHUNK_SIZE / 64)));
+        })
+        .then(function(sdata) {
+            if (!sdata.ok) throw new Error(sdata.err || '传输失败');
+            var percent = sdata.progress || Math.round(end / screenFile.size * 100);
+            document.getElementById('screenProgressBar').style.width = percent + '%';
+            document.getElementById('screenProgressBar').textContent = percent + '%';
+            document.getElementById('screenProgressStatus').textContent =
+                '传输中... ' + (index + 1) + '/' + totalChunks +
+                ' (' + formatSize(end) + ' / ' + formatSize(screenFile.size) + ')';
+            return uploadScreenChunks(index + 1, totalChunks);
+        });
+}
+
+function cancelScreenUpload() {
+    screenUploadCancelled = true;
+    log('正在取消屏幕升级...', 'warn');
+    document.getElementById('screenProgressStatus').textContent = '已取消';
+    resetScreenButtons();
+}
+
+function resetScreenButtons() {
+    document.getElementById('screenUploadBtn').disabled = false;
+    document.getElementById('screenCancelBtn').style.display = 'none';
+}
+
+// ========== File Transfer (异步轮询模式) ==========
+// .ebs 压缩包解析 (来自 custom_archive_tool.html)
+const EBS_MAGIC = new Uint8Array([0x4D, 0x59, 0x5A, 0x00]); // "MYZ\0"
+
+function rleDecompress(data, originalSize) {
+    var src = new Uint8Array(data);
+    var out = new Uint8Array(originalSize);
+    var si = 0, oi = 0;
+    while (si < src.length && oi < originalSize) {
+        if (src[si] === 0xFF) {
+            si++;
+            if (si + 1 >= src.length) break;
+            var count = (src[si] << 8) | src[si + 1]; si += 2; // Big-Endian uint16
+            if (si >= src.length) break;
+            var byte = src[si]; si++;
+            for (var j = 0; j < count && oi < originalSize; j++) out[oi++] = byte;
+        } else {
+            out[oi++] = src[si++];
+        }
+    }
+    return out;
+}
+
+function parseEbs(buffer) {
+    var view = new DataView(buffer);
+    if (buffer.byteLength < 6) throw new Error('文件太小，不是有效的 .ebs 文件');
+    for (var i = 0; i < 4; i++) {
+        if (view.getUint8(i) !== EBS_MAGIC[i]) throw new Error('魔数校验失败：不是 .ebs 文件');
+    }
+    var pos = 4;
+    var fileCount = view.getUint16(pos, false); pos += 2; // Big-Endian
+    if (fileCount === 0) throw new Error('压缩包中没有文件');
+
+    var entries = [];
+    var decoder = new TextDecoder();
+    for (var i = 0; i < fileCount; i++) {
+        var nameLen = view.getUint16(pos, false); pos += 2;
+        var nameBytes = new Uint8Array(buffer, pos, nameLen); pos += nameLen;
+        var originalSize = view.getUint32(pos, false); pos += 4;
+        var compressedSize = view.getUint32(pos, false); pos += 4;
+        var dataOffset = view.getUint32(pos, false); pos += 4;
+        entries.push({
+            name: decoder.decode(nameBytes),
+            originalSize: originalSize,
+            compressedSize: compressedSize,
+            dataOffset: dataOffset
+        });
+    }
+    // 提取压缩数据
+    for (var i = 0; i < entries.length; i++) {
+        var e = entries[i];
+        e.compressedData = buffer.slice(e.dataOffset, e.dataOffset + e.compressedSize);
+        e.decompressedData = rleDecompress(e.compressedData, e.originalSize);
+    }
+    return entries;
+}
+
+// 文件透传状态
+var transferFile = null;
+var transferEntries = null;  // .ebs 解压后的文件列表
+var transferCancelled = false;
+var FILE_CHUNK_SIZE = 16384; // 默认16KB，跟随屏幕OTA动态调整
+
+var fileTransferZone = document.getElementById('fileTransferZone');
+fileTransferZone.addEventListener('dragover', function(e) { e.preventDefault(); fileTransferZone.classList.add('dragover'); });
+fileTransferZone.addEventListener('dragleave', function(e) { e.preventDefault(); fileTransferZone.classList.remove('dragover'); });
+fileTransferZone.addEventListener('drop', function(e) {
+    e.preventDefault(); fileTransferZone.classList.remove('dragover');
+    if (e.dataTransfer.files.length > 0) handleTransferFileSelect(e.dataTransfer.files[0]);
+});
+document.getElementById('fileTransferInput').addEventListener('change', function(e) {
+    if (e.target.files.length > 0) handleTransferFileSelect(e.target.files[0]);
+});
+
+function handleTransferFileSelect(file) {
+    transferFile = file;
+    transferEntries = null;
+    document.getElementById('fileTransferInfo').classList.add('active');
+    document.getElementById('fileTransferName').textContent = file.name;
+    document.getElementById('fileTransferBtn').disabled = true;
+    document.getElementById('ebsFileList').innerHTML = '正在解析...';
+
+    file.arrayBuffer().then(function(buffer) {
+        try {
+            transferEntries = parseEbs(buffer);
+            var totalSize = 0;
+            var html = '';
+            for (var i = 0; i < transferEntries.length; i++) {
+                var e = transferEntries[i];
+                totalSize += e.originalSize;
+                html += '<div>sd0/' + escapeHtml(e.name) + ' (' + formatSize(e.originalSize) + ')</div>';
+            }
+            document.getElementById('fileTransferSize').textContent =
+                transferEntries.length + ' 个文件, 共 ' + formatSize(totalSize);
+            document.getElementById('ebsFileList').innerHTML = html;
+            document.getElementById('fileTransferBtn').disabled = false;
+            log('已选择 .ebs: ' + file.name + ' (' + formatSize(file.size) + '), 包含 ' + transferEntries.length + ' 个文件', 'info');
+        } catch (err) {
+            document.getElementById('fileTransferSize').textContent = '解析失败';
+            document.getElementById('ebsFileList').innerHTML = '<span style="color:#f00;">' + err.message + '</span>';
+            log('.ebs 解析失败: ' + err.message, 'error');
+        }
+    });
+}
+
+function pollFileTransferStatus(timeout, interval) {
+    var pollInterval = interval || 200;
+    return new Promise(function(resolve, reject) {
+        var count = 0;
+        var maxCount = timeout || 200;
+        var timer = setInterval(function() {
+            if (transferCancelled) { clearInterval(timer); reject(new Error('cancelled')); return; }
+            count++;
+            fetch('/screen_file/status')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (!data.pending) {
+                        clearInterval(timer);
+                        resolve(data);
+                    } else if (count > maxCount) {
+                        clearInterval(timer);
+                        reject(new Error('超时'));
+                    }
+                })
+                .catch(function() {
+                    if (count > maxCount) {
+                        clearInterval(timer);
+                        reject(new Error('网络错误'));
+                    }
+                });
+        }, pollInterval);
+    });
+}
+
+function startFileTransfer() {
+    if (!transferEntries || transferEntries.length === 0) return;
+
+    transferCancelled = false;
+    document.getElementById('fileTransferBtn').disabled = true;
+    document.getElementById('fileTransferCancelBtn').style.display = 'inline-block';
+    document.getElementById('fileTransferProgressWrap').classList.add('active');
+
+    log('开始 .ebs 批量传输: ' + transferEntries.length + ' 个文件', 'info');
+
+    // 计算总大小
+    var totalSize = 0;
+    for (var i = 0; i < transferEntries.length; i++) totalSize += transferEntries[i].originalSize;
+
+    transferEbsFile(0, totalSize, 0)
+        .then(function() {
+            log('全部文件传输完成!', 'success');
+            document.getElementById('fileTransferProgressStatus').textContent = '全部传输完成!';
+            document.getElementById('fileTransferProgressBar').style.width = '100%';
+            document.getElementById('fileTransferProgressBar').textContent = '100%';
+            resetTransferButtons();
+        })
+        .catch(function(err) {
+            if (transferCancelled) {
+                log('文件透传已取消', 'warn');
+                fetch('/screen_file/cancel', { method: 'POST' }).catch(function() {});
+            } else {
+                log('文件透传失败: ' + (err.message || err), 'error');
+                document.getElementById('fileTransferProgressStatus').textContent = '传输失败: ' + (err.message || err);
+            }
+            resetTransferButtons();
+        });
+}
+
+// 逐个传输 .ebs 中的文件
+function transferEbsFile(index, totalSize, transferred) {
+    if (transferCancelled) return Promise.reject(new Error('cancelled'));
+    if (index >= transferEntries.length) return Promise.resolve();
+
+    var entry = transferEntries[index];
+    var destPath = 'sd0/' + entry.name;
+    var fileSize = entry.originalSize;
+    var totalChunks = Math.ceil(fileSize / FILE_CHUNK_SIZE);
+
+    log('传输文件 ' + (index + 1) + '/' + transferEntries.length + ': ' + destPath + ' (' + formatSize(fileSize) + ')', 'info');
+    document.getElementById('fileTransferProgressStatus').textContent =
+        '文件 ' + (index + 1) + '/' + transferEntries.length + ': ' + entry.name + ' 联机中...';
+
+    return fetch('/screen_file/begin', { method: 'POST', body: destPath + ',' + fileSize })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (!data.ok && !data.pending) throw new Error(data.error || '启动失败');
+            return pollFileTransferStatus(200);
+        })
+        .then(function(data) {
+            if (!data.ok) throw new Error(data.err || '联机失败');
+            return transferEbsChunks(entry, 0, totalChunks, index, totalSize, transferred);
+        })
+        .then(function() {
+            return fetch('/screen_file/finish', { method: 'POST' }).then(function(r) { return r.json(); });
+        })
+        .then(function() { return pollFileTransferStatus(100); })
+        .then(function(data) {
+            if (!data.ok) throw new Error(data.err || '收尾失败');
+            log('文件 ' + entry.name + ' 传输成功', 'success');
+            // 传输下一个文件
+            return transferEbsFile(index + 1, totalSize, transferred + fileSize);
+        });
+}
+
+// 传输单个文件的分块
+function transferEbsChunks(entry, chunkIndex, totalChunks, fileIndex, totalSize, transferred) {
+    if (transferCancelled) return Promise.reject(new Error('cancelled'));
+    if (chunkIndex >= totalChunks) return Promise.resolve();
+
+    var start = chunkIndex * FILE_CHUNK_SIZE;
+    var end = Math.min(start + FILE_CHUNK_SIZE, entry.originalSize);
+    var chunk = entry.decompressedData.slice(start, end);
+    var chunkBlob = new Blob([chunk]);
+
+    return fetch('/screen_file/chunk', { method: 'POST', body: chunkBlob, headers: {'Content-Type': 'application/octet-stream'} })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (!data.ok && !data.pending) throw new Error(data.error || '传输失败');
+            return pollFileTransferStatus(200, Math.max(200, Math.round(FILE_CHUNK_SIZE / 64)));
+        })
+        .then(function(sdata) {
+            if (!sdata.ok) throw new Error(sdata.err || '传输失败');
+            // 更新进度: 已传输 + 当前文件进度
+            var currentTransferred = transferred + end;
+            var percent = Math.floor(currentTransferred / totalSize * 100);
+            document.getElementById('fileTransferProgressBar').style.width = percent + '%';
+            document.getElementById('fileTransferProgressBar').textContent = percent + '%';
+            document.getElementById('fileTransferProgressStatus').textContent =
+                '文件 ' + (fileIndex + 1) + ': ' + entry.name +
+                ' ' + (chunkIndex + 1) + '/' + totalChunks +
+                ' (' + formatSize(currentTransferred) + ' / ' + formatSize(totalSize) + ')';
+            if (sdata.done) {
+                log('屏幕返回完成信号: ' + entry.name, 'success');
+                return;
+            }
+            return transferEbsChunks(entry, chunkIndex + 1, totalChunks, fileIndex, totalSize, transferred);
+        });
+}
+
+function cancelFileTransfer() {
+    transferCancelled = true;
+    log('正在取消文件透传...', 'warn');
+    document.getElementById('fileTransferProgressStatus').textContent = '已取消';
+    resetTransferButtons();
+}
+
+function resetTransferButtons() {
+    document.getElementById('fileTransferBtn').disabled = false;
+    document.getElementById('fileTransferCancelBtn').style.display = 'none';
+}
+
+// ========== BLE Pollution Sources ==========
+function refreshBleSources() {
+    fetch('/ble/sources')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var list = document.getElementById('bleSourcesList');
+            if (!data.ok || !data.sources || data.sources.length === 0) {
+                list.innerHTML = '<p style="color:#999;">暂无污染源路由</p>';
+                return;
+            }
+            var html = '<table style="width:100%;border-collapse:collapse;font-size:13px;">';
+            html += '<tr style="background:#f0f2f5;text-align:left;"><th style="padding:8px;border:1px solid #ddd;">Major</th><th style="padding:8px;border:1px solid #ddd;">类型</th><th style="padding:8px;border:1px solid #ddd;">RSSI近/远</th><th style="padding:8px;border:1px solid #ddd;">最大浓度</th><th style="padding:8px;border:1px solid #ddd;">预警</th><th style="padding:8px;border:1px solid #ddd;">操作</th></tr>';
+            data.sources.forEach(function(s) {
+                html += '<tr><td style="padding:8px;border:1px solid #ddd;">' + s.major + '</td>'
+                    + '<td style="padding:8px;border:1px solid #ddd;">' + escapeHtml(s.type) + '</td>'
+                    + '<td style="padding:8px;border:1px solid #ddd;">' + s.rssi_near + '/' + s.rssi_far + '</td>'
+                    + '<td style="padding:8px;border:1px solid #ddd;">' + s.max_conc + '</td>'
+                    + '<td style="padding:8px;border:1px solid #ddd;">' + s.warn_conc + '</td>'
+                    + '<td style="padding:8px;border:1px solid #ddd;"><button class="btn btn-danger" style="padding:4px 12px;font-size:12px;" onclick="deleteBleSource(' + s.major + ')">删除</button></td></tr>';
+            });
+            html += '</table>';
+            list.innerHTML = html;
+        })
+        .catch(function() {
+            document.getElementById('bleSourcesList').innerHTML = '<p style="color:#e74c3c;">加载失败</p>';
+        });
+}
+
+function addBleSource() {
+    var body = JSON.stringify({
+        major: parseInt(document.getElementById('srcMajor').value),
+        type: document.getElementById('srcType').value,
+        rssi_near: parseInt(document.getElementById('srcRssiNear').value),
+        rssi_far: parseInt(document.getElementById('srcRssiFar').value),
+        max_conc: parseInt(document.getElementById('srcMaxConc').value),
+        warn_conc: parseInt(document.getElementById('srcWarnConc').value),
+    });
+    fetch('/ble/sources/add', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: body})
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.ok) {
+                log('添加污染源成功: major=' + data.source.major, 'success');
+                document.getElementById('srcMajor').value = '';
+                document.getElementById('srcType').value = '';
+                refreshBleSources();
+            } else {
+                log('添加失败: ' + (data.error || '未知错误'), 'warn');
+            }
+        })
+        .catch(function() { log('添加请求失败', 'warn'); });
+}
+
+function deleteBleSource(major) {
+    if (!confirm('确认删除 major=' + major + ' 的污染源路由？')) return;
+    fetch('/ble/sources/delete', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({major: major})})
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.ok) {
+                log('删除污染源成功: major=' + major, 'success');
+                refreshBleSources();
+            } else {
+                log('删除失败: ' + (data.error || '未知错误'), 'warn');
+            }
+        })
+        .catch(function() { log('删除请求失败', 'warn'); });
+}
+
+// ========== Auto Refresh ==========
+setInterval(function() {
+    var dashboard = document.getElementById('page-dashboard');
+    if (dashboard && dashboard.classList.contains('active')) {
+        refreshDashboard();
+    }
+}, 5000);
+
+// ========== Init ==========
+log('Safex OTA Web UI 已加载', 'info');
+refreshStatus();
+</script>
+
+</body>
+</html>

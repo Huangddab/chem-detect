@@ -1,0 +1,9 @@
+D:\develop2008\DownLoad\DownLoad\bin\Release\TFTImgHelper.exe
+D:\develop2008\DownLoad\DownLoad\bin\Release\TFTImgHelper.pdb
+D:\develop2008\DownLoad\DownLoad\obj\Release\ResolveAssemblyReference.cache
+D:\develop2008\DownLoad\DownLoad\obj\Release\TFTImgHelper.MainFrame.resources
+D:\develop2008\DownLoad\DownLoad\obj\Release\TFTImgHelper.MyComPortControl.resources
+D:\develop2008\DownLoad\DownLoad\obj\Release\TFTImgHelper.Properties.Resources.resources
+D:\develop2008\DownLoad\DownLoad\obj\Release\TFTImgHelper.csproj.GenerateResource.Cache
+D:\develop2008\DownLoad\DownLoad\obj\Release\TFTImgHelper.exe
+D:\develop2008\DownLoad\DownLoad\obj\Release\TFTImgHelper.pdb

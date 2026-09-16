@@ -1,0 +1,1469 @@
+--[[
+@module  test_main
+@summary 硬件模块测试集合（独立文件, 不影响主程序）
+@version 1.1
+@date    2026.08.28
+@usage
+本文件集中管理所有硬件模块的测试代码, 与 main.lua 解耦。
+使用方法:
+  1. 在 main.lua 的 app_data.start() 后面加一行: require "test_main"
+  2. 取消注释需要运行的测试块, 注释掉不需要的
+  3. 同一时间只建议启用一个测试块（避免资源冲突）
+
+测试清单:
+  ① UART1 蓝牙模块 AT 测试
+  ② SPI1 NOR Flash 读写测试
+  ②b Flash 坐标容量压力测试（快速写入 + 统计最大条数）
+  ③ IMS UART12 通信测试
+  ④ 蜂鸣器模式测试
+  ⑤ 电池电量读取测试
+  ⑥ 按键 GPIO 读取测试
+  ⑦ 按键事件监听测试
+  ⑧ WS2812B LED 颜色测试
+  ⑨ PID 传感器浓度采集测试
+  ⑩ UART10 硬件串口测试
+  ⑪ Flash 三日志真实压满测试（分别写满浓度/坐标/报警, 输出真实最大行数）
+  ⑫ Flash 寿命 endurance 测试（绕过 VFS, 直接 lf.erase/write/read 物理地址, 长时间压测）
+  ⑫b Flash 寿命测试 - 快速版（100次擦写, 验证可用性, 约30~60秒）
+  ⑫c Flash 写入速度 benchmark（测量擦除/写入/读取吞吐量）
+]]
+
+local test_main = {}
+
+-- 引用测试所需模块
+-- Lua 的 require 是全局缓存的, 这里拿到的跟 main.lua/mod_sensor 中加载的是同一个实例, 不会重复初始化
+local app_data    = require "app_data"
+local mod_led     = require "mod_led"
+local mod_buzzer  = require "mod_buzzer"
+local mod_key     = require "mod_key"
+local mod_battery = require "mod_battery"
+local mod_pid     = require "mod_pid"
+
+
+-- ========== ① UART1 蓝牙模块测试（每秒发送 AT，检测返回） ==========
+-- 测试模式：直接操作三个 GPIO 引脚全开，不走 mod_power 时序控制
+-- sys.taskInit(function()
+--     -- 1. 三个引脚全部开启
+--     pcall(function() gpio.close(27) end)
+--     pcall(function() gpio.close(26) end)
+--     pcall(function() gpio.close(28) end)
+--     gpio.setup(27, 1)  -- 总供电 ON (高电平开启)
+--     gpio.setup(26, 0)  -- 蓝牙 MOS ON (低电平开启)
+--     gpio.setup(28, 0)  -- Flash MOS ON (低电平开启, 备用)
+--     log.info("BT_TEST", "三个电源引脚已全部开启 (GPIO27=1, GPIO26=0, GPIO28=0)")
+--     sys.wait(500)  -- 等待蓝牙模块启动完成
+--
+--     -- 2. 初始化 UART1: 115200, 8N1
+--     uart.setup(1, 115200, 8, 1)
+--
+--     -- 3. 接收回调
+--     uart.on(1, "receive", function(id, len)
+--         local s = ""
+--         repeat
+--             s = uart.read(id, 128)
+--             if #s > 0 then
+--                 local escaped = s:gsub("\r", "\\r"):gsub("\n", "\\n")
+--                 log.info("BT_TEST", "收到响应:", escaped)
+--             end
+--         until s == ""
+--     end)
+--
+--     -- 4. 每秒发送 AT\r\n
+--     while true do
+--         uart.write(1, "AT\r\n")
+--         log.info("BT_TEST", "已发送 AT")
+--         sys.wait(1000)
+--     end
+-- end)
+
+
+-- ========== ② SPI1 NOR Flash 测试（初始化 + 读写验证 + 循环写入） ==========
+-- sys.taskInit(function()
+--     -- 1. 开启 Flash 电源
+--     pcall(function() gpio.close(27) end)
+--     pcall(function() gpio.close(28) end)
+--     gpio.setup(27, 1)  -- 总供电 ON
+--     gpio.setup(28, 0)  -- Flash MOS ON
+--     log.info("FLASH_TEST", "Flash 电源已开启 (GPIO27=1, GPIO28=0)")
+--     sys.wait(100)
+--
+--     -- 2. 初始化 SPI1 + little_flash + 挂载文件系统
+--     local spi_id   = 1
+--     local cs_pin   = 12       -- GPIO12 (pin 41), NOR Flash 片选
+--     local bandrate = 20 * 1000 * 1000  -- 20MHz
+--     local mount_point = "/flash_test"
+--     local spi_dev  -- 必须在 pcall 外声明, 防止被 GC 回收
+--     local lf_dev   -- 同上
+--
+--     local ok, err = pcall(function()
+--         spi_dev = spi.deviceSetup(spi_id, cs_pin, 0, 0, 8, bandrate, spi.MSB, 1, 0)
+--         if not spi_dev then error("spi.deviceSetup 返回 nil") end
+--         log.info("FLASH_TEST", string.format("SPI 初始化成功, 波特率: %dHz", bandrate))
+--
+--         lf_dev = lf.init(spi_dev)
+--         if not lf_dev then error("lf.init 返回 nil, Flash 未识别") end
+--         log.info("FLASH_TEST", "little_flash 初始化成功")
+--
+--         local mount_ok = lf.mount(lf_dev, mount_point)
+--         if not mount_ok then
+--             log.warn("FLASH_TEST", "首次挂载失败, 尝试重新挂载...")
+--             mount_ok = lf.mount(lf_dev, mount_point)
+--             if not mount_ok then error("lf.mount 两次均失败") end
+--         end
+--         log.info("FLASH_TEST", "文件系统挂载成功: " .. mount_point)
+--
+--         local fs_ok, total_blocks, used_blocks, block_size = fs.fsstat(mount_point)
+--         if fs_ok then
+--             local total_kb = total_blocks * block_size // 1024
+--             log.info("FLASH_TEST", string.format("文件系统: 总block=%d, 已用=%d, block=%d字节, 总容量=%dKB",
+--                 total_blocks, used_blocks, block_size, total_kb))
+--         end
+--     end)
+--
+--     if not ok then
+--         log.error("FLASH_TEST", "初始化失败: " .. tostring(err))
+--         return
+--     end
+--
+--     -- 3. 读写验证
+--     local test_file = "/flash_test/test.txt"
+--     local write_data = "Safex Flash Test " .. os.date()
+--     local f = io.open(test_file, "w")
+--     if f then
+--         f:write(write_data)
+--         f:close()
+--         log.info("FLASH_TEST", "写入成功: " .. write_data)
+--     end
+--
+--     local read_data = io.readFile(test_file)
+--     if read_data == write_data then
+--         log.info("FLASH_TEST", "读写验证通过")
+--     else
+--         log.error("FLASH_TEST", "读写验证失败! 读取: " .. tostring(read_data))
+--     end
+--
+--     -- 4. 循环写入测试（每 5 秒一条记录）
+--     local count = 0
+--     while true do
+--         count = count + 1
+--         local line = string.format("[%d] %s", count, os.date("%Y-%m-%d %H:%M:%S"))
+--         f = io.open(test_file, "a")
+--         if f then
+--             f:write(line .. "\n")
+--             f:close()
+--             log.info("FLASH_TEST", "追加写入 #" .. count .. ": " .. line)
+--         else
+--             log.error("FLASH_TEST", "追加写入失败 #" .. count)
+--         end
+--         sys.wait(5000)
+--     end
+-- end)
+
+
+-- ========== ②b Flash 坐标容量压力测试（快速写入 + 统计最大条数） ==========
+-- 测试目的: 验证 W25Q64 (8MB) 能存多少条 GPS 坐标记录
+-- 每条记录格式: 时间戳,纬度,经度,速度\n  (约 38 字节)
+-- 理论容量: 8MB / 38B ≈ 215,000 条 (减去文件系统开销约 200,000+)
+-- 测试方法: 用模拟坐标快速写入, 每写 1000 条打印一次进度, 写满为止
+-- sys.taskInit(function()
+--     sys.wait(2000)  -- 等待 mod_flash 挂载完成
+
+--     local flash = require "mod_flash"
+--     if not flash.get_status().mounted then
+--         log.error("CAP_TEST", "Flash 未挂载, 请确保 flash_en=true")
+--         return
+--     end
+
+--     local GPS_FILE = "/flash/gps.log"
+--     local status = flash.get_status()
+--     log.info("CAP_TEST", string.format("Flash 状态: 已挂载, 总容量=%dKB, 剩余=%dKB",
+--         status.size_kb or 0, status.free_kb or 0))
+
+--     -- 先删除旧文件, 从零开始测试
+--     os.remove(GPS_FILE)
+--     log.info("CAP_TEST", "已删除旧 gps.log, 开始写入...")
+--     sys.wait(500)
+
+--     -- 批量写入: 攒 BATCH 条拼成一个大字符串, 一次 io.write 写入
+--     -- NOR Flash 逐条写极慢 (每次 io.open/close 触发一次擦除+编程)
+--     -- 批量写可以大幅减少 Flash 擦除次数, 提速 10~50 倍
+--     local BATCH = 500         -- 每批 500 条
+--     local REPORT_EVERY = 10   -- 每 10 批 (5000 条) 打印一次进度
+
+--     local count = 0
+--     local start_time = os.time()
+--     local line_len = 0
+
+--     while true do
+--         -- 拼一批 BATCH 条
+--         local buf = {}
+--         for _ = 1, BATCH do
+--             count = count + 1
+--             local ts   = 1693000000 + count
+--             local lat  = 22.543100 + (count % 1000) * 0.000001
+--             local lng  = 113.836150 + (count % 1000) * 0.000001
+--             local spd  = (count % 50) * 0.1
+--             local line = string.format("%d,%.6f,%.6f,%.1f\n", ts, lat, lng, spd)
+--             if line_len == 0 then line_len = #line end
+--             buf[#buf + 1] = line
+--         end
+
+--         -- 一次写入整批数据
+--         local f = io.open(GPS_FILE, "a")
+--         if f then
+--             f:write(table.concat(buf))
+--             f:close()
+--         else
+--             log.error("CAP_TEST", "写入失败! count=" .. count)
+--             break
+--         end
+
+--         -- 每 REPORT_EVERY 批打印进度
+--         if (count // BATCH) % REPORT_EVERY == 0 then
+--             local fs_ok, total_b, used_b, blk_sz = fs.fsstat("/flash")
+--             local used_kb = fs_ok and (used_b * blk_sz // 1024) or 0
+--             local total_kb = fs_ok and (total_b * blk_sz // 1024) or 0
+--             local free_kb = total_kb - used_kb
+--             local elapsed = os.time() - start_time
+--             local rate = elapsed > 0 and (count / elapsed) or 0
+--             log.info("CAP_TEST", string.format(
+--                 "已写入 %d 条 | 用时 %ds | 速率 %.0f 条/s | Flash剩余 %dKB/%dKB",
+--                 count, elapsed, rate, free_kb, total_kb))
+
+--             -- 剩余空间小于 50KB 时停止
+--             if free_kb < 50 then
+--                 log.warn("CAP_TEST", "Flash 空间不足 50KB, 停止写入")
+--                 break
+--             end
+--         end
+
+--         -- 让出协程, 避免阻塞其他模块
+--         sys.wait(10)
+--     end
+
+--     -- 测试结果汇总
+--     local elapsed = os.time() - start_time
+--     local fs_ok, total_b, used_b, blk_sz = fs.fsstat("/flash")
+--     local used_kb = fs_ok and (used_b * blk_sz // 1024) or 0
+--     local total_kb = fs_ok and (total_b * blk_sz // 1024) or 0
+
+--     log.info("CAP_TEST", "========== 测试结果 ==========")
+--     log.info("CAP_TEST", string.format("总写入条数: %d", count))
+--     log.info("CAP_TEST", string.format("每行字节数: %d 字节", line_len))
+--     log.info("CAP_TEST", string.format("总数据量:   %d 字节 (%.1f KB)", count * line_len, count * line_len / 1024))
+--     log.info("CAP_TEST", string.format("Flash 容量: %d KB", total_kb))
+--     log.info("CAP_TEST", string.format("已用空间:   %d KB (%.1f%%)", used_kb, used_kb / total_kb * 100))
+--     log.info("CAP_TEST", string.format("写入用时:   %d 秒", elapsed))
+--     if elapsed > 0 then
+--         log.info("CAP_TEST", string.format("写入速率:   %.0f 条/秒", count / elapsed))
+--     end
+--     log.info("CAP_TEST", string.format("理论最大:   %d 条 (按 %d 字节/条)", total_kb * 1024 // line_len, line_len))
+
+--     -- 验证: 读取最后 5 条
+--     log.info("CAP_TEST", "--- 读取最后 5 条验证 ---")
+--     local records = flash.read_gps(5)
+--     for i, r in ipairs(records) do
+--         log.info("CAP_TEST", string.format("  [%d] ts=%d lat=%.6f lng=%.6f spd=%.1f",
+--             i, r.ts, r.lat, r.lng, r.speed))
+--     end
+-- end)
+
+
+-- ========== ③ IMS UART12 测试（V0.3 协议, 发送查询 + 解析状态响应） ==========
+-- 协议: AA + dst(1) + src(1) + cmd(1) + len(2,LE) + data(N) + CRC16(2,LE) + 0D 0A
+-- 上位机=1, 下位机=2; 功能码 0x01=读取状态
+-- sys.taskInit(function()
+--     sys.wait(3000)  -- 等待系统稳定 + WiFi 初始化完成
+--
+--     local UART_ID = 12
+--     uart.setup(UART_ID, 115200, 8, 1, 0, uart.LSB, 1024)
+--     log.info("IMS_TEST", "UART12 已初始化, 115200 8N1, pin60(TX)/pin59(RX)")
+--
+--     -- ===== CRC16 (多项式 0x1021) =====
+--     local function crc16(data, start_pos, end_pos)
+--         local crc = 0
+--         for i = start_pos, end_pos do
+--             crc = crc ~ (data:byte(i) << 8)
+--             for _ = 1, 8 do
+--                 if (crc & 0x8000) ~= 0 then
+--                     crc = (crc << 1) ~ 0x1021
+--                 else
+--                     crc = crc << 1
+--                 end
+--             end
+--         end
+--         return crc & 0xFFFF
+--     end
+--
+--     -- ===== 构建请求帧 =====
+--     local function build_request(cmd, data)
+--         data = data or ""
+--         local prefix = string.char(0xAA, 0x02, 0x01, cmd)
+--             .. string.pack("<I2", #data) .. data
+--         local crc = crc16(prefix, 2, #prefix)
+--         return prefix .. string.pack("<I2", crc) .. "\r\n"
+--     end
+--
+--     -- ===== 接收缓冲 + 帧解析 =====
+--     local rx_buf = ""
+--     uart.on(UART_ID, "receive", function(id, len)
+--         local s = ""
+--         repeat
+--             s = uart.read(id, 128)
+--             if #s > 0 then rx_buf = rx_buf .. s end
+--         until s == ""
+--     end)
+--
+--     -- ===== 状态描述 =====
+--     local STATUS_DESC = { [0]="预热中", [1]="检测中", [2]="清洁中" }
+--
+--     -- ===== 解析状态响应 (cmd 0x01) =====
+--     local function parse_status(data)
+--         if #data < 8 then return nil end
+--         local status       = data:byte(1)
+--         local fault        = data:byte(2)
+--         local alarm_count  = data:byte(3)
+--         local clean_time   = string.unpack("<I4", data, 4)
+--         local sensitivity  = -1
+--         if #data >= 808 then sensitivity = data:byte(808) end
+--
+--         -- 报警物质名称
+--         local names = {}
+--         for i = 1, math.min(alarm_count, 10) do
+--             local off = 7 + (i - 1) * 20
+--             if off + 19 <= #data then
+--                 local name = data:sub(off, off + 19):gsub("\0+$", "")
+--                 if #name > 0 then names[#names + 1] = name end
+--             end
+--         end
+--
+--         -- 故障位解析
+--         local faults = {}
+--         if fault & 0x01 ~= 0 then faults[#faults+1] = "正高压故障" end
+--         if fault & 0x02 ~= 0 then faults[#faults+1] = "负高压故障" end
+--         if fault & 0x04 ~= 0 then faults[#faults+1] = "管压故障" end
+--         if fault & 0x08 ~= 0 then faults[#faults+1] = "测温故障" end
+--         if fault & 0x10 ~= 0 then faults[#faults+1] = "过滤器失效" end
+--
+--         log.info("IMS_TEST", string.format(
+--             "状态:%s(%d)  报警:%d个  清洁剩余:%ds  灵敏度:%s  故障:0x%02X%s",
+--             STATUS_DESC[status] or "未知", status,
+--             alarm_count, clean_time,
+--             sensitivity == 0 and "高" or sensitivity == 1 and "低" or "未知",
+--             fault, #faults > 0 and ("["..table.concat(faults,",").."]") or ""))
+--         if #names > 0 then
+--             log.warn("IMS_TEST", "报警物质: " .. table.concat(names, ", "))
+--         end
+--
+--         -- 正峰谱图 (byte 207-506, 150点×2字节, LE, mV)
+--         local pos_peak = {}
+--         if #data >= 507 then
+--             local min_v, max_v = 0xFFFF, 0
+--             for i = 1, 150 do
+--                 local v = string.unpack("<I2", data, 208 + (i - 1) * 2)
+--                 pos_peak[i] = v
+--                 if v < min_v then min_v = v end
+--                 if v > max_v then max_v = v end
+--             end
+--             log.info("IMS_TEST", string.format(
+--                 "正峰谱图: 150点, 范围 %d~%d mV", min_v, max_v))
+--         end
+--
+--         -- 负峰谱图 (byte 507-806, 同上)
+--         local neg_peak = {}
+--         if #data >= 807 then
+--             local min_v, max_v = 0xFFFF, 0
+--             for i = 1, 150 do
+--                 local v = string.unpack("<I2", data, 508 + (i - 1) * 2)
+--                 neg_peak[i] = v
+--                 if v < min_v then min_v = v end
+--                 if v > max_v then max_v = v end
+--             end
+--             log.info("IMS_TEST", string.format(
+--                 "负峰谱图: 150点, 范围 %d~%d mV", min_v, max_v))
+--         end
+--     end
+--
+--     -- ===== 从缓冲区提取并解析完整帧 =====
+--     local function process_frame()
+--         if #rx_buf < 10 then return end
+--         -- 查找帧头 0xAA
+--         local idx = rx_buf:find("\xAA", 1, true)
+--         if not idx then rx_buf = "" return end
+--         if idx > 1 then rx_buf = rx_buf:sub(idx) end
+--         if #rx_buf < 7 then return end
+--         -- 读取数据长度 (小端)
+--         local data_len = string.unpack("<I2", rx_buf, 5)
+--         local frame_len = 10 + data_len
+--         if #rx_buf < frame_len then return end
+--         -- 校验帧尾
+--         if rx_buf:byte(frame_len - 1) ~= 0x0D or rx_buf:byte(frame_len) ~= 0x0A then
+--             log.warn("IMS_TEST", "帧尾错误, 丢弃")
+--             rx_buf = rx_buf:sub(frame_len + 1)
+--             return
+--         end
+--         -- CRC 校验
+--         local crc_calc = crc16(rx_buf, 2, frame_len - 4)
+--         local crc_recv = string.unpack("<I2", rx_buf, frame_len - 3)
+--         if crc_calc ~= crc_recv then
+--             log.warn("IMS_TEST", string.format("CRC 失败: 计算=%04X 接收=%04X", crc_calc, crc_recv))
+--             rx_buf = rx_buf:sub(frame_len + 1)
+--             return
+--         end
+--         -- 提取数据区
+--         local cmd  = rx_buf:byte(4)
+--         local data = rx_buf:sub(7, 6 + data_len)
+--         rx_buf = rx_buf:sub(frame_len + 1)
+--         log.info("IMS_TEST", string.format("收到帧: cmd=0x%02X 数据长度=%d", cmd, data_len))
+--         if cmd == 0x01 then
+--             parse_status(data)
+--         else
+--             log.info("IMS_TEST", "数据 HEX:", data:toHex())
+--         end
+--     end
+--
+--     -- ===== 主循环: 每 2 秒发送状态查询 =====
+--     local req = build_request(0x01)  -- 读取状态
+--     log.info("IMS_TEST", "请求帧:", req:toHex())
+--     while true do
+--         uart.write(UART_ID, req)
+--         log.debug("IMS_TEST", "已发送状态查询")
+--         sys.wait(500)  -- 等待接收
+--         process_frame()
+--         sys.wait(1500)  -- 总周期 2 秒
+--     end
+-- end)
+
+
+-- ========== ④ 蜂鸣器测试（beep / 连续 / 间歇 三种模式验证） ==========
+-- sys.taskInit(function()
+--     sys.wait(2000)
+--
+--     log.info("BUZZ_TEST", "=== 短促提示音 x3 ===")
+--     for i = 1, 3 do
+--         mod_buzzer.beep(200)
+--         log.info("BUZZ_TEST", "beep #" .. i)
+--         sys.wait(400)
+--     end
+--
+--     log.info("BUZZ_TEST", "=== 连续鸣响 2s ===")
+--     mod_buzzer.on()
+--     sys.wait(2000)
+--     mod_buzzer.off()
+--     log.info("BUZZ_TEST", "连续鸣响结束")
+--     sys.wait(500)
+--
+--     log.info("BUZZ_TEST", "=== 间歇鸣响 5s ===")
+--     mod_buzzer.pattern("intermittent")
+--     sys.wait(5000)
+--     mod_buzzer.pattern("off")
+--     log.info("BUZZ_TEST", "间歇鸣响结束")
+--
+--     log.info("BUZZ_TEST", "=== 循环 beep (每秒一次) ===")
+--     local count = 0
+--     while true do
+--         count = count + 1
+--         mod_buzzer.beep(100)
+--         log.info("BUZZ_TEST", "循环 beep #" .. count)
+--         sys.wait(1000)
+--     end
+-- end)
+
+
+-- ========== ⑤ 电池电量测试（调用 mod_battery.read() 验证） ==========
+-- sys.taskInit(function()
+--     sys.wait(2000)
+--     log.info("BAT_TEST", "直接调用 mod_battery.read()...")
+--
+--     log.info("BAT_TEST", "=== 连续读取 10 次 (含去极值+EMA滤波) ===")
+--     local sum_vol, sum_pct = 0, 0
+--     for i = 1, 10 do
+--         local voltage, pct = mod_battery.read()
+--         if voltage > 0 then
+--             sum_vol = sum_vol + voltage
+--             sum_pct = sum_pct + pct
+--             log.info("BAT_TEST", string.format(
+--                 "#%02d  电池=%.2fV  电量=%d%%", i, voltage, pct))
+--         else
+--             log.warn("BAT_TEST", string.format("#%02d 读取失败", i))
+--         end
+--         sys.wait(500)
+--     end
+--
+--     local avg_vol = sum_vol / 10
+--     local avg_pct = sum_pct / 10
+--     log.info("BAT_TEST", string.format(
+--         "平均值: 电池=%.2fV  电量=%.0f%%", avg_vol, avg_pct))
+--
+--     log.info("BAT_TEST", "=== 循环监控 (每 5 秒一次) ===")
+--     local count = 0
+--     while true do
+--         count = count + 1
+--         local voltage, pct = mod_battery.read()
+--         if voltage > 0 then
+--             log.info("BAT_TEST", string.format(
+--                 "[%d] 电池=%.2fV  电量=%d%%", count, voltage, pct))
+--         else
+--             log.warn("BAT_TEST", string.format("[%d] 读取失败", count))
+--         end
+--         sys.wait(5000)
+--     end
+-- end)
+
+
+-- ========== ⑥ 按键测试（直接读取 GPIO 状态） ==========
+-- sys.taskInit(function()
+--     sys.wait(2000)
+--     log.info("KEY_TEST", "=== 直接读取 GPIO 状态 (GPIO153=L, GPIO147=R, GPIO146=EN) ===")
+--     log.info("KEY_TEST", "下拉(低电平)=按下, 上拉(高电平)=松开")
+--     local prev = { key_l = false, key_r = false, key_en = false }
+--     local count = 0
+--     while true do
+--         local state = mod_key.read()
+--         if state.key_l ~= prev.key_l or state.key_r ~= prev.key_r or state.key_en ~= prev.key_en then
+--             count = count + 1
+--             local function fmt(pressed) return pressed and "按下" or "松开" end
+--             log.info("KEY_TEST", string.format(
+--                 "[%d] L=%s  R=%s  EN=%s",
+--                 count, fmt(state.key_l), fmt(state.key_r), fmt(state.key_en)))
+--             prev.key_l  = state.key_l
+--             prev.key_r  = state.key_r
+--             prev.key_en = state.key_en
+--             if state.key_l or state.key_r or state.key_en then
+--                 mod_buzzer.beep(50)
+--             end
+--         end
+--         sys.wait(100)
+--     end
+-- end)
+
+
+-- ========== ⑦ 按键事件监听测试（监听 app_data 事件） ==========
+-- sys.taskInit(function()
+--     sys.wait(2000)
+--     log.info("KEY_TEST", "=== 监听 app_data 按键事件 ===")
+--     local prev_event = ""
+--     while true do
+--         local key_data = app_data.get().io.key
+--         if key_data and key_data.key_event ~= "" and key_data.key_event ~= prev_event then
+--             log.info("KEY_TEST", string.format(
+--                 "事件: key=%s  event=%s  time=%s",
+--                 key_data.last_key, key_data.key_event, tostring(key_data.timestamp)))
+--             prev_event = key_data.key_event
+--         end
+--         sys.wait(50)
+--     end
+-- end)
+
+
+-- ========== ⑧ WS2812B LED 测试（调用 mod_led.set_raw 单颗灯珠） ==========
+-- 注意: led_en 需保持 false, 避免后台协程每 50ms 覆盖颜色
+-- sys.taskInit(function()
+--     sys.wait(2000)
+--     log.info("LED_TEST", "=== 调用 mod_led.set_raw 测试 (GPIO1, 1颗灯珠) ===")
+--
+--     local COLORS = {
+--         {name = "红",   val = 0x100000},
+--         {name = "绿",   val = 0x001000},
+--         {name = "蓝",   val = 0x000010},
+--         {name = "黄",   val = 0x101000},
+--         {name = "紫",   val = 0x100010},
+--         {name = "青",   val = 0x001010},
+--         {name = "白",   val = 0x101010},
+--         {name = "灭",   val = 0x000000},
+--     }
+--
+--     log.info("LED_TEST", "--- 逐色点亮 ---")
+--     for i, c in ipairs(COLORS) do
+--         mod_led.set_raw(c.val)
+--         log.info("LED_TEST", string.format("#%d %s (0x%06X)", i, c.name, c.val))
+--         sys.wait(1000)
+--     end
+--
+--     log.info("LED_TEST", "--- 闪烁测试 x6 ---")
+--     for i = 1, 6 do
+--         mod_led.set_raw(0x101010)
+--         sys.wait(500)
+--         mod_led.set_raw(0x000000)
+--         sys.wait(500)
+--     end
+--
+--     log.info("LED_TEST", "=== 循环颜色 ===")
+--     local count = 0
+--     while true do
+--         count = count + 1
+--         local idx = (count - 1) % #COLORS + 1
+--         local c = COLORS[idx]
+--         mod_led.set_raw(c.val)
+--         log.info("LED_TEST", string.format("[%d] %s", count, c.name))
+--         sys.wait(2000)
+--     end
+-- end)
+
+
+-- ========== ⑨ PID 传感器测试（调用 mod_pid.read() 验证浓度采集） ==========
+-- 注意: 测试时 sensor_pid_en 保持 false, 避免后台协程干扰
+-- sys.taskInit(function()
+--     sys.wait(2000)
+--     log.info("PID_TEST", "=== 调用 mod_pid.read() 测试 (ADC0, pin75) ===")
+--     log.info("PID_TEST", "电压范围: 0.045V~2.5V, 浓度量程: 0~100ppm")
+--
+--     log.info("PID_TEST", "--- 连续读取 10 次 ---")
+--     local sum_vol, sum_conc = 0, 0
+--     for i = 1, 10 do
+--         local conc, raw, voltage, alarm = mod_pid.read()
+--         if voltage > 0 then
+--             sum_vol = sum_vol + voltage
+--             sum_conc = sum_conc + conc
+--             log.info("PID_TEST", string.format(
+--                 "#%02d raw=%4d  电压=%.3fV  浓度=%.1fppm  报警=%s",
+--                 i, raw, voltage, conc, alarm and "是" or "否"))
+--         else
+--             log.warn("PID_TEST", string.format("#%02d 读取失败", i))
+--         end
+--         sys.wait(500)
+--     end
+--
+--     local avg_vol = sum_vol / 10
+--     local avg_conc = sum_conc / 10
+--     log.info("PID_TEST", string.format(
+--         "平均值: 电压=%.3fV  浓度=%.1fppm", avg_vol, avg_conc))
+--
+--     log.info("PID_TEST", "=== 循环监控 (每 2 秒一次) ===")
+--     local count = 0
+--     while true do
+--         count = count + 1
+--         local conc, raw, voltage, alarm = mod_pid.read()
+--         if voltage > 0 then
+--             log.info("PID_TEST", string.format(
+--                 "[%d] 电压=%.3fV  浓度=%.1fppm  报警=%s",
+--                 count, voltage, conc, alarm and "是" or "否"))
+--         else
+--             log.warn("PID_TEST", string.format("[%d] 读取失败", count))
+--         end
+--         sys.wait(2000)
+--     end
+-- end)
+
+
+-- ========== ⑩ UART10 硬件串口测试（GPIO139 TX / GPIO138 RX） ==========
+-- UART10 位于 WiFi 芯片, pin 57(TX)/pin 58(RX)
+-- 注意: WiFi 关闭后 uart10/11/12 会失效, 需确保 WiFi 已开启
+-- 接线: pin57(GPIO139) → USB转串口模块的 RX 引脚, 共地
+-- sys.taskInit(function()
+--     sys.wait(3000)  -- 等待系统稳定 + WiFi 初始化完成
+--
+--     local UART_ID = 10
+--     local BAUD     = 9600
+--
+--     uart.setup(UART_ID, BAUD, 8, 1)
+--     log.info("UART10_TEST", string.format("UART10 已启动, %d 8N1, pin57(TX)/pin58(RX)", BAUD))
+--
+--     uart.on(UART_ID, "receive", function(id, len)
+--         local s = ""
+--         repeat
+--             s = uart.read(id, 128)
+--             if #s > 0 then
+--                 local escaped = s:gsub("\r", "\\r"):gsub("\n", "\\n")
+--                 log.info("UART10_TEST", "收到:", escaped)
+--             end
+--         until s == ""
+--     end)
+--
+--     log.info("UART10_TEST", "=== 发送测试字符串 ===")
+--     uart.write(UART_ID, "Hello UART10!\r\n")
+--     log.info("UART10_TEST", "已发送: Hello UART10!")
+--     sys.wait(500)
+--
+--     uart.write(UART_ID, string.format("%d 8N1 GPIO139\r\n", BAUD))
+--     log.info("UART10_TEST", string.format("已发送: %d 8N1 GPIO139", BAUD))
+--     sys.wait(500)
+--
+--     log.info("UART10_TEST", "=== 循环发送计数 ===")
+--     local count = 0
+--     while true do
+--         count = count + 1
+--         local msg = string.format("UART10 #%d\r\n", count)
+--         uart.write(UART_ID, msg)
+--         log.info("UART10_TEST", string.format("已发送 #%d", count))
+--         sys.wait(2000)
+--     end
+-- end)
+
+
+-- ========== ⑪ Flash 三日志真实压满测试（环形模式定长格式, 分别写满, 输出真实最大行数） ==========
+-- 测试目的: 用环形模式定长格式写满整个 Flash, 拿到每种格式的真实最大行数
+--           用户根据真实结果设置环形模式各文件的行数上限和百分比
+-- 测试格式: 环形模式定长格式 (与 spec §4.1 一致)
+--   浓度: %d,%.2f,%.1f,%d,%d,%-4s,%-64s\n  → 98B/行
+--   坐标: %d,%.6f,%.6f,%.1f\n               → 38B/行
+--   报警: %d,%.2f,%.1f,%d,%-4s,%-64s\n       → 96B/行
+-- 测试方法: 逐个文件测试 — 删除旧文件 → 批量写入 → 写满 → 输出统计 → 清理
+--           三个文件独立测试, 每次写满整个 Flash (预留 50KB 安全余量)
+-- 使用方法: 取消注释下方代码, 下载运行, 约 10~15 分钟完成
+-- sys.taskInit(function()
+--     sys.wait(3000)  -- 等待系统稳定 + Flash 挂载完成
+--
+--     local TAG = "FILL_TEST"
+--     local flash = require "mod_flash"
+--     if not flash.get_status().mounted then
+--         log.error(TAG, "Flash 未挂载, 请确保 flash_en=true")
+--         return
+--     end
+--
+--     -- Flash 容量信息
+--     local function get_free_kb()
+--         local ok, total_b, used_b, blk_sz = fs.fsstat("/flash")
+--         if not ok then return 0 end
+--         local total_kb = total_b * blk_sz // 1024
+--         local used_kb  = used_b * blk_sz // 1024
+--         return total_kb - used_kb, total_kb
+--     end
+--
+--     local free_kb, total_kb = get_free_kb()
+--     log.info(TAG, string.format("Flash: 总容量 %dKB, 剩余 %dKB", total_kb, free_kb))
+--
+--     -- 模拟毒剂名称 (UTF-8, 用于 src_name 字段)
+--     -- 4 个毒剂名拼接 = "沙林;芥子气;VX神经毒剂;氯气" = 30B (UTF-8)
+--     local IMS_NAMES = "\u6c99\u6797;\u82a5\u5b50\u6c14;VX\u795e\u7ecf\u6bd2\u5242;\u6c2f\u6c14"
+--
+--     -- 三种日志的定长格式和文件路径 (与 spec §4.1 环形模式格式一致)
+--     local TESTS = {
+--         {
+--             name    = "浓度",
+--             file    = "/flash/fill_conc.tmp",
+--             tag     = "CONC",
+--             format  = "%d,%.2f,%.1f,%d,%d,%-4s,%-64s\n",
+--             expect_len = 98,  -- 预期行长 (含 \n)
+--             make_line = function(i)
+--                 -- 环形定长格式: ts,conc,th,over,level,src_type,src_name
+--                 -- 使用最大值测试极限: conc=100.00, th=100.0, level=3
+--                 -- src_type=ims (4B), src_name=毒剂名称 (30B + 34空格=64B)
+--                 return string.format("%d,%.2f,%.1f,%d,%d,%-4s,%-64s\n",
+--                     1693000000 + i,       -- ts (10B)
+--                     0.01 * (i % 10000),  -- conc (6B max)
+--                     100.0,               -- th (5B, 与浓度同范围最大值)
+--                     i % 2,               -- over (1B)
+--                     i % 4,               -- level (1B, 0~3)
+--                     "ims",               -- src_type (4B, 补空格)
+--                     IMS_NAMES)           -- src_name (64B, 补空格)
+--             end,
+--         },
+--         {
+--             name    = "坐标",
+--             file    = "/flash/fill_gps.tmp",
+--             tag     = "GPS",
+--             format  = "%d,%.6f,%.6f,%.1f\n",
+--             expect_len = 38,
+--             make_line = function(i)
+--                 -- 使用最大值测试极限: lat=90, lng=180, spd=999.9
+--                 return string.format("%d,%.6f,%.6f,%.1f\n",
+--                     1693000000 + i,
+--                     22.543100 + (i % 1000) * 0.000001,
+--                     113.836150 + (i % 1000) * 0.000001,
+--                     (i % 50) * 0.1)
+--             end,
+--         },
+--         {
+--             name    = "报警",
+--             file    = "/flash/fill_alarm.tmp",
+--             tag     = "ALARM",
+--             format  = "%d,%.2f,%.1f,%d,%-4s,%-64s\n",
+--             expect_len = 96,
+--             make_line = function(i)
+--                 -- 环形定长格式: ts,conc,th,level,src_type,src_name
+--                 -- 使用最大值: conc=100.00, th=100.0, level=3, src_type=ims, src_name=毒剂名称
+--                 return string.format("%d,%.2f,%.1f,%d,%-4s,%-64s\n",
+--                     1693000000 + i,
+--                     0.01 * (i % 10000),  -- conc (6B max)
+--                     100.0,               -- th (5B, 与浓度同范围最大值)
+--                     i % 4,               -- level (0~3)
+--                     "ims",               -- src_type (4B)
+--                     IMS_NAMES)           -- src_name (64B)
+--             end,
+--         },
+--     }
+--
+--     -- 批量写入参数
+--     local BATCH       = 500   -- 每批 500 条
+--     local REPORT_EVERY = 10   -- 每 10 批 (5000 条) 打印一次
+--     local STOP_FREE_KB = 50   -- 剩余 < 50KB 时停止
+--
+--     local results = {}  -- 存储三个测试的结果
+--
+--     for _, test in ipairs(TESTS) do
+--         log.info(TAG, "========================================")
+--         log.info(TAG, string.format("开始 %s 日志压满测试 (%s)", test.name, test.tag))
+--         log.info(TAG, string.format("定长格式: %s", test.format))
+--         log.info(TAG, string.format("预期行长: %dB (含 \\n)", test.expect_len))
+--         log.info(TAG, "========================================")
+--
+--         -- 先删除旧文件 + 其他临时文件, 释放全部空间
+--         for _, t in ipairs(TESTS) do
+--             os.remove(t.file)
+--         end
+--         sys.wait(500)
+--
+--         -- 验证行长度 (确保定长格式正确)
+--         local sample = test.make_line(1)
+--         local line_len = #sample
+--         log.info(TAG, string.format("样本行: [%dB] %s",
+--             line_len, sample:gsub("\n", "\\n")))
+--         if line_len ~= test.expect_len then
+--             log.warn(TAG, string.format("警告: 实际行长 %dB != 预期 %dB, 请检查格式!",
+--                 line_len, test.expect_len))
+--         end
+--
+--         -- 获取初始空间
+--         local init_free, init_total = get_free_kb()
+--         log.info(TAG, string.format("初始空间: %dKB / %dKB", init_free, init_total))
+--
+--         -- 批量写入
+--         local count = 0
+--         local start_time = os.time()
+--         local write_fail = false
+--
+--         while not write_fail do
+--             -- 拼一批
+--             local buf = {}
+--             for _ = 1, BATCH do
+--                 count = count + 1
+--                 buf[#buf + 1] = test.make_line(count)
+--             end
+--
+--             -- 写入
+--             local f = io.open(test.file, "a")
+--             if f then
+--                 f:write(table.concat(buf))
+--                 f:close()
+--             else
+--                 log.error(TAG, "写入失败! count=" .. count)
+--                 write_fail = true
+--                 break
+--             end
+--
+--             -- 定期打印进度
+--             if (count // BATCH) % REPORT_EVERY == 0 then
+--                 local cur_free, cur_total = get_free_kb()
+--                 local elapsed = os.time() - start_time
+--                 local rate = elapsed > 0 and (count / elapsed) or 0
+--                 log.info(TAG, string.format(
+--                     "%s 已写入 %d 条 | %ds | %.0f 条/s | 剩余 %dKB",
+--                     test.tag, count, elapsed, rate, cur_free))
+--
+--                 if cur_free < STOP_FREE_KB then
+--                     log.warn(TAG, string.format("%s 剩余空间 %dKB < %dKB, 停止",
+--                         test.tag, cur_free, STOP_FREE_KB))
+--                     break
+--                 end
+--             end
+--
+--             -- 让出协程
+--             sys.wait(10)
+--         end
+--
+--         -- 测量文件实际大小
+--         local f = io.open(test.file, "r")
+--         local file_size = 0
+--         if f then
+--             file_size = f:seek("end")
+--             f:close()
+--         end
+--
+--         local elapsed = os.time() - start_time
+--         local cur_free, cur_total = get_free_kb()
+--
+--         -- 记录结果
+--         local r = {
+--             name      = test.name,
+--             tag       = test.tag,
+--             count     = count,
+--             line_len  = line_len,
+--             file_size = file_size,
+--             file_kb   = file_size / 1024,
+--             file_mb   = file_size / 1024 / 1024,
+--             elapsed   = elapsed,
+--             rate      = elapsed > 0 and (count / elapsed) or 0,
+--             total_kb  = total_kb,
+--             used_kb   = total_kb - cur_free,
+--             free_kb   = cur_free,
+--         }
+--         results[#results + 1] = r
+--
+--         -- 输出单个结果
+--         log.info(TAG, string.format("---------- %s 测试结果 ----------", test.name))
+--         log.info(TAG, string.format("总写入条数: %d", count))
+--         log.info(TAG, string.format("每行字节数: %d B (预期 %d B)", line_len, test.expect_len))
+--         log.info(TAG, string.format("文件大小:   %d B (%.1f KB / %.2f MB)",
+--             file_size, r.file_kb, r.file_mb))
+--         log.info(TAG, string.format("Flash 总量: %d KB", total_kb))
+--         log.info(TAG, string.format("已用空间:   %d KB", r.used_kb))
+--         log.info(TAG, string.format("剩余空间:   %d KB", cur_free))
+--         log.info(TAG, string.format("写入用时:   %d 秒", elapsed))
+--         if elapsed > 0 then
+--             log.info(TAG, string.format("写入速率:   %.0f 条/秒", r.rate))
+--         end
+--
+--         -- 读取最后 3 条验证 (定长行可直接按行长度定位)
+--         log.info(TAG, "--- 读取最后 3 条验证 ---")
+--         local f2 = io.open(test.file, "r")
+--         if f2 then
+--             local size = f2:seek("end")
+--             local read_start = math.max(0, size - line_len * 3)
+--             f2:seek("set", read_start)
+--             local data = f2:read(line_len * 3)
+--             f2:close()
+--             local idx = 0
+--             for line in (data .. "\n"):gmatch("([^\n]*)\n") do
+--                 if line ~= "" then
+--                     idx = idx + 1
+--                     log.info(TAG, string.format("  [%d] (%dB) %s", idx, #line, line))
+--                 end
+--             end
+--         end
+--
+--         -- 清理这个文件, 为下一个测试释放空间
+--         os.remove(test.file)
+--         sys.wait(500)
+--     end
+--
+--     -- ===== 汇总三个测试结果 =====
+--     log.info(TAG, "##################################################")
+--     log.info(TAG, "##     三日志环形定长格式压满测试汇总           ##")
+--     log.info(TAG, "##################################################")
+--     log.info(TAG, "")
+--     log.info(TAG, string.format("Flash 总容量: %d KB (%.1f MB)", total_kb, total_kb / 1024))
+--     log.info(TAG, "")
+--     log.info(TAG, string.format("%-6s | %8s | %4s | %10s | %10s | %8s",
+--         "日志", "最大条数", "行长", "文件大小", "实际占用", "写入速率"))
+--     log.info(TAG, string.format("%s", "------|----------|------|------------|------------|---------"))
+--     for _, r in ipairs(results) do
+--         log.info(TAG, string.format("%-6s | %8d | %4dB | %8.1fKB | %8.1fKB | %6.0f/s",
+--             r.name, r.count, r.line_len, r.file_kb, r.used_kb, r.rate))
+--     end
+--     log.info(TAG, "")
+--
+--     -- 建议行数上限 (取真实最大值的 90%, 留 10% 给 LittleFS 元数据)
+--     log.info(TAG, "根据以上真实数据, 设置各文件行数上限时建议:")
+--     for _, r in ipairs(results) do
+--         local suggested = math.floor(r.count * 0.9)
+--         log.info(TAG, string.format("  %s: 真实最大 %d 条, 行长 %dB → 建议上限 %d 条 (90%%余量)",
+--             r.name, r.count, r.line_len, suggested))
+--     end
+--     log.info(TAG, "")
+--
+--     -- 百分比换算参考
+--     local usable_kb = total_kb - 512  -- 预留 512KB LittleFS 开销
+--     log.info(TAG, string.format("百分比换算参考 (可用 %dKB = %.1fMB, 预留 512KB):", usable_kb, usable_kb / 1024))
+--     for _, r in ipairs(results) do
+--         -- 各百分比下的行数
+--         local n10 = math.floor(usable_kb * 1024 * 0.1 / r.line_len)
+--         local n20 = math.floor(usable_kb * 1024 * 0.2 / r.line_len)
+--         local n30 = math.floor(usable_kb * 1024 * 0.3 / r.line_len)
+--         local n40 = math.floor(usable_kb * 1024 * 0.4 / r.line_len)
+--         local n50 = math.floor(usable_kb * 1024 * 0.5 / r.line_len)
+--         local n60 = math.floor(usable_kb * 1024 * 0.6 / r.line_len)
+--         log.info(TAG, string.format("  %s (%dB/行): 10%%=%d, 20%%=%d, 30%%=%d, 40%%=%d, 50%%=%d, 60%%=%d",
+--             r.name, r.line_len, n10, n20, n30, n40, n50, n60))
+--     end
+--     log.info(TAG, "")
+--
+--     -- 常见百分比组合建议
+--     log.info(TAG, "常见百分比组合 (浓度%%/坐标%%/报警%%):")
+--     local combos = {
+--         {50, 30, 20},  -- 默认
+--         {60, 30, 10},  -- 浓度优先
+--         {33, 33, 34},  -- 均分
+--         {40, 40, 20},  -- 浓度坐标均分
+--     }
+--     for _, c in ipairs(combos) do
+--         local conc_n = math.floor(usable_kb * 1024 * c[1] / 100 / results[1].line_len)
+--         local gps_n  = math.floor(usable_kb * 1024 * c[2] / 100 / results[2].line_len)
+--         local alm_n  = math.floor(usable_kb * 1024 * c[3] / 100 / results[3].line_len)
+--         log.info(TAG, string.format("  %d/%d/%d → 浓度 %d + 坐标 %d + 报警 %d = %d 行",
+--             c[1], c[2], c[3], conc_n, gps_n, alm_n, conc_n + gps_n + alm_n))
+--     end
+--     log.info(TAG, "")
+--     log.info(TAG, "========== 压满测试结束 ==========")
+-- end)
+
+
+-- ========== ⑫ Flash 寿命 endurance 测试（绕过 VFS, 直接 lf.erase/write/read 物理地址） ==========
+-- 测试目的: 对 W25Q64 SPI NOR Flash 进行擦写寿命压测, 验证扇区在多次擦写后是否仍能正确读写
+-- 测试原理: 选取若干扇区, 反复执行 擦除→写入→读回验证 循环, 统计成功/失败次数
+--           NOR Flash 标称寿命 ~100,000 次擦写/扇区, 本测试用加速方式逼近极限
+-- 底层 API: lf.erase(flash, addr, size) / lf.write(flash, addr, data) / lf.read(flash, addr, size)
+--           这些 API 绕过 VFS/LittleFS, 直接操作 Flash 物理地址, 无文件系统开销
+-- 测试参数:
+--   TEST_SECTORS  = 测试扇区数量 (每个扇区 4KB), 建议选 Flash 末尾区域, 不影响文件系统
+--   ERASE_SIZE    = 扇区大小 (W25Q64 = 4096 bytes)
+--   PAGE_SIZE     = 页编程大小 (W25Q64 = 256 bytes)
+--   TARGET_CYCLES = 每扇区目标擦写次数 (10万次 = 标称寿命极限)
+--   VERIFY_EVERY  = 每隔多少次循环做一次读回验证 (每次都验证太慢, 默认每 100 次验证一次)
+--   REPORT_EVERY  = 每隔多少次循环打印一次进度
+-- 注意: 本测试会破坏被测扇区的数据, 请选择 Flash 末尾区域 (避开文件系统分区)
+--       测试结束后自动擦除被测扇区 (恢复为 0xFF 全空状态)
+-- 使用方法:
+--   1. 确保 flash_en=true, mod_flash 已挂载 (本测试绕过 VFS, 但需要 lf.init 后的设备对象)
+--   2. 取消注释下方代码
+--   3. 烧录运行, 通过串口日志观察进度
+--   4. 测试可能需要数小时~数十小时 (取决于 TARGET_CYCLES)
+-- sys.taskInit(function()
+--     sys.wait(3000)  -- 等待系统稳定 + Flash 挂载完成
+--
+--     local TAG = "ENDURANCE"
+--
+--     -- ===== 测试参数 (可根据需要修改) =====
+--     local TEST_SECTORS  = 4          -- 测试 4 个扇区 (16KB), 选 Flash 末尾区域
+--     local ERASE_SIZE    = 4096       -- W25Q64 扇区大小 = 4KB
+--     local PAGE_SIZE     = 256        -- W25Q64 页编程大小 = 256B
+--     local TARGET_CYCLES = 100000     -- 目标擦写次数 (标称寿命极限)
+--     local VERIFY_EVERY  = 100        -- 每 100 次做一次读回验证
+--     local REPORT_EVERY  = 1000      -- 每 1000 次打印一次进度
+--     local BATCH_PAGES   = 16         -- 每批写入 16 页 (4096B = 1 个扇区)
+--
+--     -- ===== 初始化 SPI + Flash 设备 (独立于 mod_flash, 不依赖 VFS 挂载) =====
+--     -- 注意: 这里重新初始化一个 SPI 设备对象, 不影响 mod_flash 的已挂载文件系统
+--     --      lf.init 内部通过 SFDP 识别芯片, 不会冲突
+--     local SPI_ID   = 1
+--     local CS_PIN   = 12
+--     local BANDRATE = 20 * 1000 * 1000  -- 20MHz
+--
+--     local spi_dev = spi.deviceSetup(SPI_ID, CS_PIN, 0, 0, 8, BANDRATE, spi.MSB, 1, 0)
+--     if not spi_dev then
+--         log.error(TAG, "SPI 初始化失败")
+--         return
+--     end
+--     log.info(TAG, string.format("SPI 初始化成功, 波特率: %dHz", BANDRATE))
+--
+--     local flash_dev = lf.init(spi_dev)
+--     if not flash_dev then
+--         log.error(TAG, "lf.init 失败, Flash 未识别")
+--         return
+--     end
+--
+--     -- 获取 Flash 芯片信息
+--     local capacity, prog_size, erase_size = lf.getInfo(flash_dev)
+--     log.info(TAG, string.format("Flash 芯片信息: 容量=%d bytes (%.1f MB), 编程页=%dB, 擦除块=%dB",
+--         capacity, capacity / 1024 / 1024, prog_size, erase_size))
+--
+--     if erase_size ~= ERASE_SIZE then
+--         log.warn(TAG, string.format("警告: 实际擦除块 %dB != 预期 %dB, 已自动适配", erase_size, ERASE_SIZE))
+--         ERASE_SIZE = erase_size
+--     end
+--
+--     -- ===== 计算测试区域: 选 Flash 末尾区域, 不影响文件系统 =====
+--     -- 文件系统从地址 0 开始, 我们选最后几个扇区做测试
+--     -- 预留前 7MB 给文件系统, 后 1MB 用于测试
+--     local TEST_START_ADDR = capacity - TEST_SECTORS * ERASE_SIZE
+--     log.info(TAG, string.format("测试区域: 0x%06X ~ 0x%06X (%d 个扇区, %d KB)",
+--         TEST_START_ADDR, capacity - 1, TEST_SECTORS, TEST_SECTORS * ERASE_SIZE // 1024))
+--
+--     -- ===== 生成测试数据模式 =====
+--     -- 用伪随机模式写入, 每次循环数据不同, 以检测是否真正写入
+--     local function make_pattern(cycle, sector_idx)
+--         -- 用 cycle 和 sector_idx 作为种子生成 256B 数据
+--         -- 简单 LFSR 伪随机, 不依赖 math.random
+--         local data = {}
+--         local seed = (cycle * 31 + sector_idx * 17 + 0xA5) & 0xFFFFFFFF
+--         for i = 0, PAGE_SIZE - 1 do
+--             -- 线性同余生成器
+--             seed = (seed * 1103515245 + 12345) & 0xFFFFFFFF
+--             data[i + 1] = string.char((seed >> 16) & 0xFF)
+--         end
+--         return table.concat(data)
+--     end
+--
+--     -- ===== 测试数据验证函数 =====
+--     local function verify_pattern(cycle, sector_idx, read_data)
+--         local expected = make_pattern(cycle, sector_idx)
+--         return read_data == expected
+--     end
+--
+--     -- ===== 预备: 先擦除测试区域 =====
+--     log.info(TAG, "预备: 擦除测试区域...")
+--     for s = 0, TEST_SECTORS - 1 do
+--         local addr = TEST_START_ADDR + s * ERASE_SIZE
+--         local ok = lf.erase(flash_dev, addr, ERASE_SIZE)
+--         if not ok then
+--             log.error(TAG, string.format("预备擦除失败: 扇区 %d (0x%06X)", s, addr))
+--             return
+--         end
+--     end
+--     log.info(TAG, "预备擦除完成")
+--     sys.wait(100)
+--
+--     -- ===== 主循环: 逐扇区逐页擦写 =====
+--     local total_writes   = 0  -- 总写入次数 (所有扇区合计)
+--     local total_errors   = 0  -- 总验证失败次数
+--     local total_erases   = 0  -- 总擦除次数
+--     local start_time     = os.time()
+--     local verify_failures = {}  -- 记录失败的扇区和循环号
+--
+--     log.info(TAG, string.format("开始寿命测试: %d 扇区 × %d 次循环 = %d 次擦写",
+--         TEST_SECTORS, TARGET_CYCLES, TEST_SECTORS * TARGET_CYCLES))
+--     log.info(TAG, string.format("每 %d 次验证一次, 每 %d 次打印一次进度", VERIFY_EVERY, REPORT_EVERY))
+--
+--     for cycle = 1, TARGET_CYCLES do
+--         local cycle_start = os.time()
+--
+--         for sector = 0, TEST_SECTORS - 1 do
+--             local base_addr = TEST_START_ADDR + sector * ERASE_SIZE
+--
+--             -- 1. 擦除扇区
+--             local ok = lf.erase(flash_dev, base_addr, ERASE_SIZE)
+--             if not ok then
+--                 log.error(TAG, string.format("擦除失败! cycle=%d sector=%d addr=0x%06X",
+--                     cycle, sector, base_addr))
+--                 total_errors = total_errors + 1
+--                 goto next_sector
+--             end
+--             total_erases = total_erases + 1
+--
+--             -- 2. 逐页写入 (每页 256B, 共 16 页 = 4096B)
+--             for page = 0, BATCH_PAGES - 1 do
+--                 local page_addr = base_addr + page * PAGE_SIZE
+--                 local data = make_pattern(cycle, sector)
+--                 ok = lf.write(flash_dev, page_addr, data)
+--                 if not ok then
+--                     log.error(TAG, string.format("写入失败! cycle=%d sector=%d page=%d addr=0x%06X",
+--                         cycle, sector, page, page_addr))
+--                     total_errors = total_errors + 1
+--                     goto next_sector
+--                 end
+--                 total_writes = total_writes + 1
+--             end
+--
+--             -- 3. 定期读回验证
+--             if cycle % VERIFY_EVERY == 0 then
+--                 for page = 0, BATCH_PAGES - 1 do
+--                     local page_addr = base_addr + page * PAGE_SIZE
+--                     local read_data = lf.read(flash_dev, page_addr, PAGE_SIZE)
+--                     if not verify_pattern(cycle, sector, read_data) then
+--                         log.error(TAG, string.format(
+--                             "验证失败! cycle=%d sector=%d page=%d addr=0x%06X",
+--                             cycle, sector, page, page_addr))
+--                         total_errors = total_errors + 1
+--                         verify_failures[#verify_failures + 1] = {
+--                             cycle = cycle, sector = sector, page = page
+--                         }
+--                         -- 发现错误后继续测试, 统计失败率
+--                         goto next_sector
+--                     end
+--                 end
+--             end
+--
+--             ::next_sector::
+--         end
+--
+--         -- 进度报告
+--         if cycle % REPORT_EVERY == 0 then
+--             local elapsed = os.time() - start_time
+--             local total_ops = total_writes + total_erases
+--             local rate = elapsed > 0 and (total_ops / elapsed) or 0
+--             local pct = cycle / TARGET_CYCLES * 100
+--             local remaining = elapsed > 0 and math.ceil((TARGET_CYCLES - cycle) * elapsed / cycle) or 0
+--             log.info(TAG, string.format(
+--                 "进度: %d/%d (%.1f%%) | 擦写 %d 次 | 错误 %d 次 | %ds | 速率 %.0f ops/s | 预计剩余 %ds",
+--                 cycle, TARGET_CYCLES, pct, total_ops, total_errors, elapsed, rate, remaining))
+--         end
+--
+--         -- 让出协程, 防止看门狗超时
+--         sys.wait(10)
+--     end
+--
+--     -- ===== 测试结束汇总 =====
+--     local elapsed = os.time() - start_time
+--     local total_ops = total_writes + total_erases
+--     local per_sector_ops = total_ops // TEST_SECTORS
+--
+--     log.info(TAG, "========================================")
+--     log.info(TAG, "========== Flash 寿命测试结果 ==========")
+--     log.info(TAG, "========================================")
+--     log.info(TAG, string.format("Flash 型号:   W25Q64 (容量 %d MB)", capacity // 1024 // 1024))
+--     log.info(TAG, string.format("测试扇区:   %d 个 (0x%06X ~ 0x%06X)",
+--         TEST_SECTORS, TEST_START_ADDR, capacity - 1))
+--     log.info(TAG, string.format("擦写次数:   %d 次/扇区 (目标 %d)", per_sector_ops, TARGET_CYCLES))
+--     log.info(TAG, string.format("总操作数:   %d (写入 %d + 擦除 %d)", total_ops, total_writes, total_erases))
+--     log.info(TAG, string.format("错误次数:   %d", total_errors))
+--     log.info(TAG, string.format("测试用时:   %d 秒 (%.1f 分钟 / %.2f 小时)",
+--         elapsed, elapsed / 60, elapsed / 3600))
+--     if elapsed > 0 then
+--         log.info(TAG, string.format("操作速率:   %.0f ops/s", total_ops / elapsed))
+--     end
+--
+--     -- 寿命评估
+--     local error_rate = total_ops > 0 and (total_errors / total_ops * 100) or 0
+--     log.info(TAG, string.format("错误率:     %.4f%%", error_rate))
+--     if total_errors == 0 then
+--         log.info(TAG, string.format("结论: %d 次擦写全部成功, Flash 寿命正常", per_sector_ops))
+--         if per_sector_ops >= 100000 then
+--             log.info(TAG, "已达标称寿命 100,000 次, Flash 仍工作正常")
+--         else
+--             log.info(TAG, string.format("当前测试 %d 次 < 标称 100,000 次, 可增大 TARGET_CYCLES 继续测试",
+--                 per_sector_ops))
+--         end
+--     else
+--         log.warn(TAG, string.format("发现 %d 次错误, 错误率 %.4f%%", total_errors, error_rate))
+--         if #verify_failures > 0 then
+--             log.warn(TAG, "首次失败详情:")
+--             for i = 1, math.min(#verify_failures, 10) do
+--                 local f = verify_failures[i]
+--                 log.warn(TAG, string.format("  [%d] cycle=%d sector=%d page=%d",
+--                     i, f.cycle, f.sector, f.page))
+--             end
+--         end
+--         if error_rate > 0.1 then
+--             log.warn(TAG, "错误率 > 0.1%, Flash 可能已达到寿命极限")
+--         end
+--     end
+--
+--     -- 清理: 擦除测试区域 (恢复为 0xFF 全空状态)
+--     log.info(TAG, "清理: 擦除测试区域...")
+--     for s = 0, TEST_SECTORS - 1 do
+--         local addr = TEST_START_ADDR + s * ERASE_SIZE
+--         lf.erase(flash_dev, addr, ERASE_SIZE)
+--     end
+--     log.info(TAG, "清理完成, 测试区域已恢复为空状态")
+--     log.info(TAG, "========== 寿命测试结束 ==========")
+-- end)
+
+
+-- ========== ⑫b Flash 寿命测试 - 快速版（少量循环, 验证擦写功能可用性） ==========
+-- 测试目的: 快速验证 Flash 擦写功能是否正常 (不做长时间寿命压测)
+-- 测试方法: 对 1 个扇区执行 100 次擦写循环, 每次都做读回验证
+-- 预计耗时: 约 30~60 秒
+-- 适用场景: 更换 Flash 芯片后验证可用性, 或日常功能检查
+-- sys.taskInit(function()
+--     sys.wait(3000)
+--
+--     local TAG = "ENDURANCE_Q"
+--
+--     -- ===== 参数 =====
+--     local TEST_SECTORS  = 1      -- 只测 1 个扇区
+--     local ERASE_SIZE    = 4096   -- 4KB
+--     local PAGE_SIZE     = 256    -- 256B
+--     local TARGET_CYCLES = 100    -- 100 次循环
+--     local BATCH_PAGES   = 16     -- 16 页 = 1 扇区
+--
+--     -- ===== 初始化 =====
+--     local spi_dev = spi.deviceSetup(1, 12, 0, 0, 8, 20*1000*1000, spi.MSB, 1, 0)
+--     if not spi_dev then log.error(TAG, "SPI 初始化失败") return end
+--
+--     local flash_dev = lf.init(spi_dev)
+--     if not flash_dev then log.error(TAG, "lf.init 失败") return end
+--
+--     local capacity, prog_size, erase_size = lf.getInfo(flash_dev)
+--     log.info(TAG, string.format("Flash: %d MB, 页 %dB, 擦除块 %dB",
+--         capacity//1024//1024, prog_size, erase_size))
+--
+--     if erase_size ~= ERASE_SIZE then ERASE_SIZE = erase_size end
+--
+--     local TEST_START_ADDR = capacity - TEST_SECTORS * ERASE_SIZE
+--     log.info(TAG, string.format("测试区域: 0x%06X ~ 0x%06X", TEST_START_ADDR, capacity - 1))
+--
+--     -- 伪随机数据生成
+--     local function make_pattern(cycle, sector_idx)
+--         local data = {}
+--         local seed = (cycle * 31 + sector_idx * 17 + 0xA5) & 0xFFFFFFFF
+--         for i = 0, PAGE_SIZE - 1 do
+--             seed = (seed * 1103515245 + 12345) & 0xFFFFFFFF
+--             data[i + 1] = string.char((seed >> 16) & 0xFF)
+--         end
+--         return table.concat(data)
+--     end
+--
+--     -- 主循环
+--     local errors = 0
+--     local start_time = os.time()
+--
+--     log.info(TAG, string.format("开始快速擦写测试: %d 扇区 x %d 循环", TEST_SECTORS, TARGET_CYCLES))
+--
+--     for cycle = 1, TARGET_CYCLES do
+--         for sector = 0, TEST_SECTORS - 1 do
+--             local base_addr = TEST_START_ADDR + sector * ERASE_SIZE
+--
+--             -- 擦除
+--             if not lf.erase(flash_dev, base_addr, ERASE_SIZE) then
+--                 log.error(TAG, string.format("擦除失败 cycle=%d sector=%d", cycle, sector))
+--                 errors = errors + 1
+--                 goto next
+--             end
+--
+--             -- 逐页写入
+--             for page = 0, BATCH_PAGES - 1 do
+--                 local page_addr = base_addr + page * PAGE_SIZE
+--                 local data = make_pattern(cycle, sector)
+--                 if not lf.write(flash_dev, page_addr, data) then
+--                     log.error(TAG, string.format("写入失败 cycle=%d sector=%d page=%d", cycle, sector, page))
+--                     errors = errors + 1
+--                     goto next
+--                 end
+--             end
+--
+--             -- 读回验证 (每次都验证)
+--             for page = 0, BATCH_PAGES - 1 do
+--                 local page_addr = base_addr + page * PAGE_SIZE
+--                 local read_data = lf.read(flash_dev, page_addr, PAGE_SIZE)
+--                 local expected = make_pattern(cycle, sector)
+--                 if read_data ~= expected then
+--                     log.error(TAG, string.format("验证失败 cycle=%d sector=%d page=%d", cycle, sector, page))
+--                     -- 打印前几个不匹配的字节
+--                     for i = 1, math.min(16, #expected) do
+--                         if read_data:byte(i) ~= expected:byte(i) then
+--                             log.error(TAG, string.format("  byte[%d]: 期望 0x%02X, 实际 0x%02X",
+--                                 i, expected:byte(i), read_data:byte(i) or 0))
+--                         end
+--                     end
+--                     errors = errors + 1
+--                     goto next
+--                 end
+--             end
+--             ::next::
+--         end
+--
+--         -- 进度
+--         if cycle % 10 == 0 then
+--             local elapsed = os.time() - start_time
+--             log.info(TAG, string.format("进度: %d/%d | 错误: %d | %ds", cycle, TARGET_CYCLES, errors, elapsed))
+--         end
+--
+--         sys.wait(10)
+--     end
+--
+--     -- 汇总
+--     local elapsed = os.time() - start_time
+--     log.info(TAG, "========== 快速擦写测试结果 ==========")
+--     log.info(TAG, string.format("擦写次数: %d 次/扇区", TARGET_CYCLES))
+--     log.info(TAG, string.format("错误次数: %d", errors))
+--     log.info(TAG, string.format("测试用时: %d 秒", elapsed))
+--     if errors == 0 then
+--         log.info(TAG, "全部通过, Flash 擦写功能正常")
+--     else
+--         log.warn(TAG, string.format("发现 %d 个错误, Flash 可能有问题", errors))
+--     end
+--
+--     -- 清理
+--     lf.erase(flash_dev, TEST_START_ADDR, ERASE_SIZE * TEST_SECTORS)
+--     log.info(TAG, "测试区域已清理")
+--     log.info(TAG, "========== 快速测试结束 ==========")
+-- end)
+
+
+-- ========== ⑫c Flash 写入速度 benchmark（测量擦除/写入/读取吞吐量） ==========
+-- 测试目的: 测量 Flash 底层擦除、写入、读取的原始速度 (不经过 VFS)
+-- 测试方法: 对 1 个扇区执行 擦除→写入→读取, 计时并计算吞吐量
+--           分别测试 256B/1KB/4KB 不同数据块大小的写入速度
+-- sys.taskInit(function()
+--     sys.wait(3000)
+--
+--     local TAG = "BENCH"
+--
+--     local spi_dev = spi.deviceSetup(1, 12, 0, 0, 8, 20*1000*1000, spi.MSB, 1, 0)
+--     if not spi_dev then log.error(TAG, "SPI 初始化失败") return end
+--
+--     local flash_dev = lf.init(spi_dev)
+--     if not flash_dev then log.error(TAG, "lf.init 失败") return end
+--
+--     local capacity, prog_size, erase_size = lf.getInfo(flash_dev)
+--     log.info(TAG, string.format("Flash: %d MB, 页 %dB, 擦除块 %dB",
+--         capacity//1024//1024, prog_size, erase_size))
+--
+--     local TEST_ADDR = capacity - erase_size  -- 最后一个扇区
+--
+--     -- 测试数据块大小
+--     local BLOCKS = {256, 512, 1024, 2048, 4096}
+--
+--     -- 生成固定数据 (全 0x55, 兼容性好)
+--     local function make_data(size)
+--         return string.rep("\x55", size)
+--     end
+--
+--     -- 计时函数 (毫秒)
+--     local function get_ms()
+--         return mcu and mcu.ticks() or os.time() * 1000
+--     end
+--
+--     -- 先擦除
+--     log.info(TAG, "擦除测试扇区...")
+--     lf.erase(flash_dev, TEST_ADDR, erase_size)
+--
+--     log.info(TAG, "========== Flash 底层读写速度测试 ==========")
+--     log.info(TAG, string.format("测试地址: 0x%06X, 扇区大小: %dB", TEST_ADDR, erase_size))
+--     log.info(TAG, "")
+--
+--     -- 1. 擦除速度
+--     local t0 = get_ms()
+--     for i = 1, 10 do
+--         lf.erase(flash_dev, TEST_ADDR, erase_size)
+--     end
+--     local t1 = get_ms()
+--     local erase_ms = (t1 - t0) / 10
+--     local erase_throughput = erase_size / (erase_ms / 1000)  -- bytes/s
+--     log.info(TAG, string.format("擦除: %dB x 10 次 = %.1f ms/次, 速率 %.0f KB/s (%.1f ms/扇区)",
+--         erase_size, erase_ms, erase_throughput / 1024, erase_ms))
+--
+--     -- 2. 写入速度 (不同块大小)
+--     log.info(TAG, "")
+--     log.info(TAG, "写入速度测试:")
+--     for _, block_size in ipairs(BLOCKS) do
+--         local data = make_data(block_size)
+--         local rounds = math.floor(erase_size / block_size)
+--
+--         -- 每次测试前先擦除
+--         lf.erase(flash_dev, TEST_ADDR, erase_size)
+--
+--         t0 = get_ms()
+--         for i = 0, rounds - 1 do
+--             lf.write(flash_dev, TEST_ADDR + i * block_size, data)
+--         end
+--         t1 = get_ms()
+--         local write_ms = t1 - t0
+--         local total_bytes = block_size * rounds
+--         local throughput = total_bytes / (write_ms / 1000)
+--         log.info(TAG, string.format("  %4dB x %3d 次 = %5d bytes, %.1f ms, 速率 %.0f KB/s",
+--             block_size, rounds, total_bytes, write_ms, throughput / 1024))
+--     end
+--
+--     -- 3. 读取速度 (不同块大小)
+--     log.info(TAG, "")
+--     log.info(TAG, "读取速度测试:")
+--     for _, block_size in ipairs(BLOCKS) do
+--         local rounds = math.floor(erase_size / block_size)
+--
+--         t0 = get_ms()
+--         for i = 0, rounds - 1 do
+--             lf.read(flash_dev, TEST_ADDR + i * block_size, block_size)
+--         end
+--         t1 = get_ms()
+--         local read_ms = t1 - t0
+--         local total_bytes = block_size * rounds
+--         local throughput = total_bytes / (read_ms / 1000)
+--         log.info(TAG, string.format("  %4dB x %3d 次 = %5d bytes, %.1f ms, 速率 %.0f KB/s",
+--             block_size, rounds, total_bytes, read_ms, throughput / 1024))
+--     end
+--
+--     -- 4. eraseWrite 速度
+--     log.info(TAG, "")
+--     log.info(TAG, "擦写一体 (eraseWrite) 速度:")
+--     local data_4k = make_data(erase_size)
+--     t0 = get_ms()
+--     for i = 1, 5 do
+--         lf.eraseWrite(flash_dev, TEST_ADDR, data_4k)
+--     end
+--     t1 = get_ms()
+--     local ew_ms = (t1 - t0) / 5
+--     local ew_throughput = erase_size / (ew_ms / 1000)
+--     log.info(TAG, string.format("  %4dB x 5 次, %.1f ms/次, 速率 %.0f KB/s",
+--         erase_size, ew_ms, ew_throughput / 1024))
+--
+--     -- 清理
+--     lf.erase(flash_dev, TEST_ADDR, erase_size)
+--     log.info(TAG, "")
+--     log.info(TAG, "========== Benchmark 结束 ==========")
+-- end)
+
+
+log.info("TEST_MAIN", "测试文件已加载 (所有测试默认注释, 取消注释需要的测试块即可)")
+
+return test_main

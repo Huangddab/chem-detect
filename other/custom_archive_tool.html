@@ -1,0 +1,814 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MyZip - 自定义压缩格式工具</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+  background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+  min-height: 100vh;
+  color: #e0e0e0;
+}
+.container { max-width: 900px; margin: 0 auto; padding: 20px; }
+header {
+  text-align: center;
+  padding: 40px 0 30px;
+}
+header h1 {
+  font-size: 2.4em;
+  font-weight: 700;
+  background: linear-gradient(90deg, #f093fb, #f5576c, #fda085);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin-bottom: 8px;
+}
+header .subtitle { color: #aaa; font-size: 0.95em; }
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 20px;
+  border-radius: 12px;
+  overflow: hidden;
+}
+.tabs button {
+  flex: 1;
+  padding: 14px 20px;
+  border: none;
+  background: rgba(255,255,255,0.06);
+  color: #ccc;
+  font-size: 1em;
+  cursor: pointer;
+  transition: all 0.25s;
+  font-weight: 600;
+}
+.tabs button.active {
+  background: linear-gradient(135deg, #f5576c, #f093fb);
+  color: #fff;
+}
+.tabs button:hover:not(.active) { background: rgba(255,255,255,0.12); }
+
+.panel { display: none; }
+.panel.active { display: block; }
+
+.card {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 16px;
+  padding: 28px;
+  margin-bottom: 20px;
+  backdrop-filter: blur(10px);
+}
+
+.dropzone {
+  border: 2px dashed rgba(255,255,255,0.25);
+  border-radius: 14px;
+  padding: 50px 20px;
+  text-align: center;
+  transition: all 0.3s;
+  cursor: pointer;
+  margin-bottom: 16px;
+}
+.dropzone:hover, .dropzone.drag-over {
+  border-color: #f5576c;
+  background: rgba(245,87,108,0.08);
+}
+.dropzone .icon { font-size: 3em; margin-bottom: 10px; }
+.dropzone .hint { color: #999; font-size: 0.9em; margin-top: 8px; }
+
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 10px 24px;
+  border: none;
+  border-radius: 10px;
+  font-size: 0.95em;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.btn-primary {
+  background: linear-gradient(135deg, #f5576c, #f093fb);
+  color: #fff;
+}
+.btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(245,87,108,0.35); }
+.btn-secondary {
+  background: rgba(255,255,255,0.1);
+  color: #e0e0e0;
+}
+.btn-secondary:hover { background: rgba(255,255,255,0.18); }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; box-shadow: none; }
+
+.file-list { margin-top: 16px; }
+.file-item {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px;
+  background: rgba(255,255,255,0.04);
+  border-radius: 10px;
+  margin-bottom: 8px;
+}
+.file-item .name { font-weight: 500; word-break: break-all; }
+.file-item .size { color: #999; font-size: 0.85em; white-space: nowrap; margin-left: 12px; }
+.file-item .actions { display: flex; gap: 8px; margin-left: 12px; }
+
+.progress {
+  height: 6px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 3px;
+  margin-top: 16px;
+  overflow: hidden;
+  display: none;
+}
+.progress .bar {
+  height: 100%;
+  background: linear-gradient(90deg, #f5576c, #f093fb);
+  border-radius: 3px;
+  transition: width 0.3s;
+  width: 0%;
+}
+
+.status { margin-top: 12px; font-size: 0.9em; color: #aaa; min-height: 1.3em; }
+.status.success { color: #6dd5b8; }
+.status.error { color: #f5576c; }
+
+.spec-diagram {
+  font-family: 'Cascadia Code', 'Consolas', 'Courier New', monospace;
+  background: rgba(0,0,0,0.3);
+  padding: 20px;
+  border-radius: 12px;
+  font-size: 0.82em;
+  line-height: 1.9;
+  overflow-x: auto;
+  white-space: pre;
+  color: #8be9fd;
+}
+.spec-diagram .hl { color: #f093fb; }
+.spec-diagram .dim { color: #6272a4; }
+
+.spec-table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+.spec-table th, .spec-table td {
+  padding: 10px 14px;
+  text-align: left;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.spec-table th { color: #f093fb; font-weight: 600; font-size: 0.85em; text-transform: uppercase; }
+.spec-table td { font-size: 0.9em; }
+.spec-table td code {
+  background: rgba(255,255,255,0.1);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+
+footer { text-align: center; padding: 30px 0; color: #555; font-size: 0.8em; }
+
+input[type="file"] { display: none; }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <header>
+    <h1>MyZip Archive Tool</h1>
+    <p class="subtitle">自定义压缩格式 .ebs — 打包 / 压缩 / 解压 / 格式学习</p>
+  </header>
+
+  <div class="tabs">
+    <button class="active" data-tab="compress">打包压缩</button>
+    <button data-tab="decompress">解压文件</button>
+    <button data-tab="spec">格式说明</button>
+  </div>
+
+  <!-- 压缩面板 -->
+  <div id="panel-compress" class="panel active">
+    <div class="card">
+      <h3 style="margin-bottom:14px;">选择要打包的文件</h3>
+      <div class="dropzone" id="compress-dropzone">
+        <div class="icon">+</div>
+        <div>点击此处选择文件，或拖拽到此处</div>
+        <div class="hint">支持任意类型文件，可多选</div>
+      </div>
+      <input type="file" id="compress-input" multiple>
+      <div class="file-list" id="compress-file-list"></div>
+      <div class="progress" id="compress-progress"><div class="bar" id="compress-bar"></div></div>
+      <div class="status" id="compress-status"></div>
+      <div style="margin-top:14px; display:flex; gap:10px; flex-wrap:wrap;">
+        <button class="btn btn-primary" id="btn-compress" disabled>压缩打包</button>
+        <button class="btn btn-secondary" id="btn-clear-compress">清空列表</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 解压面板 -->
+  <div id="panel-decompress" class="panel">
+    <div class="card">
+      <h3 style="margin-bottom:14px;">打开 .ebs 文件</h3>
+      <div class="dropzone" id="decompress-dropzone">
+        <div class="icon">+</div>
+        <div>点击此处选择 .ebs 文件，或拖拽到此处</div>
+        <div class="hint">仅支持 .ebs 格式</div>
+      </div>
+      <input type="file" id="decompress-input" accept=".ebs">
+      <div class="file-list" id="decompress-file-list"></div>
+      <div class="progress" id="decompress-progress"><div class="bar" id="decompress-bar"></div></div>
+      <div class="status" id="decompress-status"></div>
+      <div style="margin-top:14px; display:flex; gap:10px;">
+        <button class="btn btn-primary" id="btn-extract-all" style="display:none">全部解压为 ZIP</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 格式说明面板 -->
+  <div id="panel-spec" class="panel">
+    <div class="card">
+      <h3 style="margin-bottom:16px;">.ebs 格式二进制结构</h3>
+      <div class="spec-diagram">
+<span class="dim">偏移  字节</span>
+<span class="hl">0000  4</span>  魔数 <span class="dim">"MYZ\0"</span> (0x4D 0x59 0x5A 0x00)
+<span class="hl">0004  2</span>  文件计数 N (uint16, Big-Endian)
+
+<span class="dim">────── 文件列表区 (重复 N 次) ──────</span>
+       <span class="hl">2</span>  文件名长度 L (uint16, Big-Endian)
+       <span class="hl">L</span>  文件名 (UTF-8, L 字节)
+       <span class="hl">4</span>  原始文件大小 (uint32, Big-Endian)
+       <span class="hl">4</span>  压缩后大小 (uint32, Big-Endian)
+       <span class="hl">4</span>  数据区偏移量 (uint32, Big-Endian)
+<span class="dim">──────────────────────────────────</span>
+
+<span class="dim">────── 数据区 ──────</span>
+       各文件 RLE 压缩后的二进制数据依次存放
+<span class="dim">───────────────────</span>
+      </div>
+
+      <h4 style="margin-top:24px; margin-bottom:10px;">字段说明</h4>
+      <table class="spec-table">
+        <thead>
+          <tr><th>字段</th><th>大小</th><th>类型</th><th>说明</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>魔数</td><td>4 字节</td><td>ASCII</td><td>固定值 <code>MYZ\0</code>，用于识别 .ebs 文件</td></tr>
+          <tr><td>文件计数</td><td>2 字节</td><td>uint16 BE</td><td>打包的文件总数</td></tr>
+          <tr><td>文件名长度</td><td>2 字节</td><td>uint16 BE</td><td>文件名 UTF-8 字节数</td></tr>
+          <tr><td>文件名</td><td>可变</td><td>UTF-8</td><td>原始文件名（保留中文/特殊字符）</td></tr>
+          <tr><td>原始大小</td><td>4 字节</td><td>uint32 BE</td><td>解压后的文件大小（字节）</td></tr>
+          <tr><td>压缩后大小</td><td>4 字节</td><td>uint32 BE</td><td>RLE 压缩后数据大小（字节）</td></tr>
+          <tr><td>偏移量</td><td>4 字节</td><td>uint32 BE</td><td>该文件压缩数据在数据区中的起始偏移</td></tr>
+        </tbody>
+      </table>
+
+      <h4 style="margin-top:24px; margin-bottom:10px;">RLE 压缩算法说明</h4>
+      <p style="color:#bbb; line-height:1.8; font-size:0.92em;">
+        <strong>游程编码（Run-Length Encoding）</strong> 是一种无损压缩算法，核心思想：将连续重复的字节替换为 <code>[标记][计数][字节]</code> 三元组。
+      </p>
+      <p style="color:#bbb; line-height:1.8; font-size:0.92em; margin-top:8px;">
+        <strong>编码规则：</strong><br>
+        1. 普通字节（非重复）：直接输出。<br>
+        2. 连续重复 3 个及以上的字节：输出 <code>0xFF</code> 标记 + 2 字节重复次数（uint16） + 重复的字节值。<br>
+        3. 如果数据中出现 <code>0xFF</code> 字节但并非标记，则输出 <code>0xFF 0x00 0x01 0xFF</code>（将单个 0xFF 当作长度为 1 的"重复"编码）。<br>
+        <br>
+        <strong>示例：</strong> <code>AA BB BB BB BB CC</code> → <code>AA FF 00 04 BB CC</code>（4 个 BB 被压缩为标记+计数+值）。
+      </p>
+    </div>
+  </div>
+
+  <footer>
+    MyZip Custom Archive Format — 纯前端实现 · 无需后端
+  </footer>
+</div>
+
+<script>
+/* ================================================================
+   MyZip — 自定义压缩格式纯前端实现
+   格式：.ebs  |  魔数：MYZ\0  |  压缩：RLE 游程编码
+   ================================================================ */
+
+const MAGIC = new Uint8Array([0x4D, 0x59, 0x5A, 0x00]); // "MYZ\0"
+
+// ─── RLE 压缩 ───────────────────────────────────────────────
+function rleCompress(data) {
+  const src = new Uint8Array(data);
+  const chunks = [];
+  let i = 0;
+  while (i < src.length) {
+    const byte = src[i];
+    let run = 1;
+    while (i + run < src.length && src[i + run] === byte && run < 65535) {
+      run++;
+    }
+    if (run >= 3 || byte === 0xFF) {
+      // 使用标记编码
+      chunks.push([0xFF]);
+      const cnt = new Uint8Array(2);
+      new DataView(cnt.buffer).setUint16(0, run, false);
+      chunks.push([cnt[0], cnt[1]]);
+      chunks.push([byte]);
+      i += run;
+    } else {
+      chunks.push([byte]);
+      i++;
+    }
+  }
+  // 展平
+  const totalLen = chunks.reduce((s, c) => s + c.length, 0);
+  const out = new Uint8Array(totalLen);
+  let pos = 0;
+  for (const c of chunks) {
+    out.set(c, pos);
+    pos += c.length;
+  }
+  return out;
+}
+
+// ─── RLE 解压 ───────────────────────────────────────────────
+function rleDecompress(data, originalSize) {
+  const src = new Uint8Array(data);
+  const out = new Uint8Array(originalSize);
+  let si = 0, oi = 0;
+  while (si < src.length && oi < originalSize) {
+    if (src[si] === 0xFF) {
+      si++;
+      if (si + 1 >= src.length) break;
+      const count = new DataView(src.buffer, src.byteOffset + si, 2).getUint16(0, false);
+      si += 2;
+      if (si >= src.length) break;
+      const byte = src[si];
+      si++;
+      for (let j = 0; j < count && oi < originalSize; j++) {
+        out[oi++] = byte;
+      }
+    } else {
+      out[oi++] = src[si++];
+    }
+  }
+  return out;
+}
+
+// ─── 多文件打包为 .ebs ─────────────────────────────────────
+async function createMyz(files, onProgress) {
+  // 读取所有文件
+  const fileDataList = [];
+  for (let fi = 0; fi < files.length; fi++) {
+    const f = files[fi];
+    const buf = await f.arrayBuffer();
+    fileDataList.push({ name: f.name, data: new Uint8Array(buf) });
+    if (onProgress) onProgress(Math.floor((fi + 1) / files.length * 40));
+  }
+
+  // 计算文件列表区大小
+  const encoder = new TextEncoder();
+  let headerSize = 4 + 2; // magic + file count
+  const fileMeta = [];
+  for (let fi = 0; fi < fileDataList.length; fi++) {
+    const fd = fileDataList[fi];
+    const nameBytes = encoder.encode(fd.name);
+    const entrySize = 2 + nameBytes.length + 4 + 4 + 4;
+    fileMeta.push({ nameBytes, originalSize: fd.data.length, entrySize });
+    headerSize += entrySize;
+  }
+
+  // 压缩各文件并计算偏移
+  let dataOffset = headerSize;
+  const compressedList = [];
+  for (let fi = 0; fi < fileDataList.length; fi++) {
+    const fd = fileDataList[fi];
+    const compressed = rleCompress(fd.data.buffer);
+    compressedList.push({ compressed, originalSize: fd.data.length });
+    fileMeta[fi].compressedSize = compressed.length;
+    fileMeta[fi].dataOffset = dataOffset;
+    dataOffset += compressed.length;
+    if (onProgress) onProgress(40 + Math.floor((fi + 1) / fileDataList.length * 50));
+  }
+
+  // 构建完整 .ebs
+  const totalSize = dataOffset;
+  const buf = new ArrayBuffer(totalSize);
+  const view = new DataView(buf);
+  let pos = 0;
+
+  // 魔数
+  for (let i = 0; i < 4; i++) view.setUint8(pos++, MAGIC[i]);
+  // 文件计数
+  view.setUint16(pos, fileDataList.length, false); pos += 2;
+
+  // 文件列表区
+  for (let fi = 0; fi < fileDataList.length; fi++) {
+    const meta = fileMeta[fi];
+    view.setUint16(pos, meta.nameBytes.length, false); pos += 2;
+    new Uint8Array(buf).set(meta.nameBytes, pos); pos += meta.nameBytes.length;
+    view.setUint32(pos, meta.originalSize, false); pos += 4;
+    view.setUint32(pos, meta.compressedSize, false); pos += 4;
+    view.setUint32(pos, meta.dataOffset, false); pos += 4;
+  }
+
+  // 数据区
+  for (let fi = 0; fi < compressedList.length; fi++) {
+    const c = compressedList[fi].compressed;
+    new Uint8Array(buf).set(c, pos);
+    pos += c.length;
+  }
+
+  if (onProgress) onProgress(100);
+  return buf;
+}
+
+// ─── 解析 .ebs 文件 ────────────────────────────────────────
+function parseMyz(buffer) {
+  const view = new DataView(buffer);
+  if (buffer.byteLength < 6) throw new Error('文件太小，不是有效的 .ebs 文件');
+  // 校验魔数
+  for (let i = 0; i < 4; i++) {
+    if (view.getUint8(i) !== MAGIC[i]) throw new Error('魔数校验失败：不是 .ebs 文件');
+  }
+  let pos = 4;
+  const fileCount = view.getUint16(pos, false); pos += 2;
+  if (fileCount === 0) throw new Error('文件中没有打包任何文件');
+
+  const entries = [];
+  const decoder = new TextDecoder();
+  for (let i = 0; i < fileCount; i++) {
+    if (pos + 2 > buffer.byteLength) throw new Error('文件列表区损坏');
+    const nameLen = view.getUint16(pos, false); pos += 2;
+    if (pos + nameLen + 12 > buffer.byteLength) throw new Error('文件列表区损坏');
+    const nameBytes = new Uint8Array(buffer, pos, nameLen); pos += nameLen;
+    const originalSize = view.getUint32(pos, false); pos += 4;
+    const compressedSize = view.getUint32(pos, false); pos += 4;
+    const dataOffset = view.getUint32(pos, false); pos += 4;
+    entries.push({
+      name: decoder.decode(nameBytes),
+      originalSize,
+      compressedSize,
+      dataOffset
+    });
+  }
+
+  // 提取各文件数据
+  for (const entry of entries) {
+    const dataStart = entry.dataOffset;
+    const dataEnd = dataStart + entry.compressedSize;
+    if (dataEnd > buffer.byteLength) throw new Error(`文件 "${entry.name}" 数据区越界`);
+    entry.compressedData = buffer.slice(dataStart, dataEnd);
+  }
+  return entries;
+}
+
+// ─── 工具函数 ───────────────────────────────────────────────
+function formatSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / 1048576).toFixed(2) + ' MB';
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// ─── UI ─────────────────────────────────────────────────────
+// 标签切换
+document.querySelectorAll('.tabs button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('panel-' + btn.dataset.tab).classList.add('active');
+  });
+});
+
+// ─── 压缩面板逻辑 ────────────────────────────────────────────
+const compressDropzone = document.getElementById('compress-dropzone');
+const compressInput = document.getElementById('compress-input');
+const compressFileList = document.getElementById('compress-file-list');
+const compressProgress = document.getElementById('compress-progress');
+const compressBar = document.getElementById('compress-bar');
+const compressStatus = document.getElementById('compress-status');
+const btnCompress = document.getElementById('btn-compress');
+const btnClear = document.getElementById('btn-clear-compress');
+
+let selectedFiles = [];
+
+function updateCompressList() {
+  compressFileList.innerHTML = '';
+  if (selectedFiles.length === 0) {
+    compressFileList.innerHTML = '<p style="color:#666;text-align:center;padding:20px;">暂未选择文件</p>';
+    btnCompress.disabled = true;
+  } else {
+    selectedFiles.forEach((f, i) => {
+      const div = document.createElement('div');
+      div.className = 'file-item';
+      div.innerHTML = `
+        <span class="name">${escapeHtml(f.name)}</span>
+        <span class="size">${formatSize(f.size)}</span>
+        <button class="btn btn-secondary" style="padding:4px 12px;font-size:0.8em;" data-idx="${i}">移除</button>
+      `;
+      compressFileList.appendChild(div);
+    });
+    btnCompress.disabled = false;
+    document.querySelectorAll('#compress-file-list button[data-idx]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        selectedFiles.splice(parseInt(btn.dataset.idx), 1);
+        updateCompressList();
+      });
+    });
+  }
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+compressDropzone.addEventListener('click', () => compressInput.click());
+compressInput.addEventListener('change', () => {
+  selectedFiles = Array.from(compressInput.files);
+  updateCompressList();
+});
+
+compressDropzone.addEventListener('dragover', e => {
+  e.preventDefault();
+  compressDropzone.classList.add('drag-over');
+});
+compressDropzone.addEventListener('dragleave', () => compressDropzone.classList.remove('drag-over'));
+compressDropzone.addEventListener('drop', async e => {
+  e.preventDefault();
+  compressDropzone.classList.remove('drag-over');
+  const files = [];
+  const items = e.dataTransfer.items;
+  if (items && items.length > 0) {
+    for (const item of items) {
+      const entry = item.webkitGetAsEntry ? item.webkitGetAsEntry() : null;
+      if (entry) {
+        await traverseEntry(entry, '', files);
+      } else if (item.kind === 'file') {
+        const f = item.getAsFile();
+        if (f) files.push(f);
+      }
+    }
+  } else if (e.dataTransfer.files.length > 0) {
+    for (const f of e.dataTransfer.files) files.push(f);
+  }
+  if (files.length > 0) {
+    selectedFiles = files;
+    updateCompressList();
+  }
+});
+
+btnClear.addEventListener('click', () => {
+  selectedFiles = [];
+  compressInput.value = '';
+  updateCompressList();
+  compressStatus.textContent = '';
+  compressProgress.style.display = 'none';
+});
+
+btnCompress.addEventListener('click', async () => {
+  if (selectedFiles.length === 0) return;
+  btnCompress.disabled = true;
+  compressProgress.style.display = 'block';
+  compressBar.style.width = '0%';
+  compressStatus.textContent = '正在压缩打包...';
+  compressStatus.className = 'status';
+
+  try {
+    const buf = await createMyz(selectedFiles, pct => {
+      compressBar.style.width = pct + '%';
+    });
+    const blob = new Blob([buf], { type: 'application/octet-stream' });
+    // 生成文件名：取第一个文件名（去扩展名）+ _archive.ebs
+    const baseName = selectedFiles[0].name.replace(/\.[^.]+$/, '') || 'archive';
+    downloadBlob(blob, baseName + '_archive.ebs');
+    compressStatus.textContent = `打包完成！共 ${selectedFiles.length} 个文件，已下载 .ebs 文件。`;
+    compressStatus.className = 'status success';
+  } catch (err) {
+    compressStatus.textContent = '压缩失败：' + err.message;
+    compressStatus.className = 'status error';
+  }
+  btnCompress.disabled = false;
+});
+
+// ─── 解压面板逻辑 ────────────────────────────────────────────
+const decompressDropzone = document.getElementById('decompress-dropzone');
+const decompressInput = document.getElementById('decompress-input');
+const decompressFileList = document.getElementById('decompress-file-list');
+const decompressProgress = document.getElementById('decompress-progress');
+const decompressBar = document.getElementById('decompress-bar');
+const decompressStatus = document.getElementById('decompress-status');
+const btnExtractAll = document.getElementById('btn-extract-all');
+
+let parsedEntries = null;
+
+function renderDecompressList() {
+  decompressFileList.innerHTML = '';
+  btnExtractAll.style.display = 'none';
+  if (!parsedEntries || parsedEntries.length === 0) return;
+  parsedEntries.forEach((entry, i) => {
+    const ratio = entry.originalSize > 0
+      ? ((1 - entry.compressedSize / entry.originalSize) * 100).toFixed(1)
+      : '0';
+    const div = document.createElement('div');
+    div.className = 'file-item';
+    div.innerHTML = `
+      <span class="name">${escapeHtml(entry.name)}</span>
+      <span class="size">${formatSize(entry.originalSize)} (压缩率 ${ratio}%)</span>
+      <div class="actions">
+        <button class="btn btn-primary" style="padding:4px 14px;font-size:0.8em;" data-idx="${i}">下载</button>
+      </div>
+    `;
+    decompressFileList.appendChild(div);
+  });
+  document.querySelectorAll('#decompress-file-list button[data-idx]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const entry = parsedEntries[parseInt(btn.dataset.idx)];
+      try {
+        const decompressed = rleDecompress(entry.compressedData, entry.originalSize);
+        const blob = new Blob([decompressed], { type: 'application/octet-stream' });
+        downloadBlob(blob, entry.name);
+      } catch (err) {
+        decompressStatus.textContent = `解压 "${entry.name}" 失败：${err.message}`;
+        decompressStatus.className = 'status error';
+      }
+    });
+  });
+  if (parsedEntries.length > 1) btnExtractAll.style.display = 'inline-flex';
+}
+
+btnExtractAll.addEventListener('click', async () => {
+  if (!parsedEntries || parsedEntries.length === 0) return;
+  btnExtractAll.disabled = true;
+  decompressBar.style.width = '0%';
+  decompressStatus.textContent = '正在打包 ZIP...';
+  decompressStatus.className = 'status';
+  try {
+    const zipBlob = await createZipFromEntries(parsedEntries, pct => {
+      decompressBar.style.width = pct + '%';
+    });
+    downloadBlob(zipBlob, 'extracted.zip');
+    decompressStatus.textContent = '全部解压完成，已下载 extracted.zip（含目录结构）';
+    decompressStatus.className = 'status success';
+  } catch (err) {
+    decompressStatus.textContent = '打包 ZIP 失败：' + err.message;
+    decompressStatus.className = 'status error';
+  }
+  btnExtractAll.disabled = false;
+});
+
+// ─── 纯前端 ZIP 打包器 (STORE 方法，无压缩) ─────────────────
+function crc32(data) {
+  let crc = 0xFFFFFFFF;
+  for (let i = 0; i < data.length; i++) {
+    crc ^= data[i];
+    for (let j = 0; j < 8; j++) {
+      crc = (crc >>> 1) ^ (crc & 1 ? 0xEDB88320 : 0);
+    }
+  }
+  return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+
+function dosTime(date) {
+  const d = date || new Date();
+  return (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >>> 1);
+}
+
+function dosDate(date) {
+  const d = date || new Date();
+  return ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
+}
+
+async function createZipFromEntries(entries, onProgress) {
+  const encoder = new TextEncoder();
+  const localHeaders = [];
+  const centralHeaders = [];
+  const fileDatas = [];
+  let dataOffset = 0;
+
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i];
+    const rawData = rleDecompress(entry.compressedData, entry.originalSize);
+    const nameBytes = encoder.encode(entry.name);
+    const crc = crc32(rawData);
+    const size = rawData.byteLength;
+    const mtime = dosTime();
+    const mdate = dosDate();
+
+    const localHeader = new ArrayBuffer(30 + nameBytes.length);
+    const lv = new DataView(localHeader);
+    lv.setUint32(0, 0x04034b50, true);
+    lv.setUint16(4, 20, true);
+    lv.setUint16(6, 0, true);
+    lv.setUint16(8, 0, true);
+    lv.setUint16(10, mtime, true);
+    lv.setUint16(12, mdate, true);
+    lv.setUint32(14, crc, true);
+    lv.setUint32(18, size, true);
+    lv.setUint32(22, size, true);
+    lv.setUint16(26, nameBytes.length, true);
+    lv.setUint16(28, 0, true);
+    new Uint8Array(localHeader).set(nameBytes, 30);
+
+    const centralHeader = new ArrayBuffer(46 + nameBytes.length);
+    const cv = new DataView(centralHeader);
+    cv.setUint32(0, 0x02014b50, true);
+    cv.setUint16(4, 20, true);
+    cv.setUint16(6, 20, true);
+    cv.setUint16(8, 0, true);
+    cv.setUint16(10, 0, true);
+    cv.setUint16(12, mtime, true);
+    cv.setUint16(14, mdate, true);
+    cv.setUint32(16, crc, true);
+    cv.setUint32(20, size, true);
+    cv.setUint32(24, size, true);
+    cv.setUint16(28, nameBytes.length, true);
+    cv.setUint16(30, 0, true);
+    cv.setUint16(32, 0, true);
+    cv.setUint16(34, 0, true);
+    cv.setUint16(36, 0, true);
+    cv.setUint32(38, 0, true);
+    cv.setUint32(42, dataOffset, true);
+    new Uint8Array(centralHeader).set(nameBytes, 46);
+
+    localHeaders.push(localHeader);
+    centralHeaders.push(centralHeader);
+    fileDatas.push(rawData);
+    dataOffset += localHeader.byteLength + size;
+    if (onProgress) onProgress(Math.floor((i + 1) / entries.length * 80));
+  }
+
+  const centralOffset = dataOffset;
+  const centralSize = centralHeaders.reduce((s, h) => s + h.byteLength, 0);
+  const eocd = new ArrayBuffer(22);
+  const ev = new DataView(eocd);
+  ev.setUint32(0, 0x06054b50, true);
+  ev.setUint16(4, 0, true);
+  ev.setUint16(6, 0, true);
+  ev.setUint16(8, entries.length, true);
+  ev.setUint16(10, entries.length, true);
+  ev.setUint32(12, centralSize, true);
+  ev.setUint32(16, centralOffset, true);
+  ev.setUint16(20, 0, true);
+
+  const total = centralOffset + centralSize + 22;
+  const zip = new Uint8Array(total);
+  let pos = 0;
+  for (let i = 0; i < entries.length; i++) {
+    zip.set(new Uint8Array(localHeaders[i]), pos); pos += localHeaders[i].byteLength;
+    zip.set(new Uint8Array(fileDatas[i]), pos); pos += fileDatas[i].byteLength;
+  }
+  for (const h of centralHeaders) {
+    zip.set(new Uint8Array(h), pos); pos += h.byteLength;
+  }
+  zip.set(new Uint8Array(eocd), pos);
+
+  if (onProgress) onProgress(100);
+  return new Blob([zip], { type: 'application/zip' });
+}
+
+decompressDropzone.addEventListener('click', () => decompressInput.click());
+decompressInput.addEventListener('change', () => handleDecompressFile(decompressInput.files[0]));
+
+decompressDropzone.addEventListener('dragover', e => {
+  e.preventDefault();
+  decompressDropzone.classList.add('drag-over');
+});
+decompressDropzone.addEventListener('dragleave', () => decompressDropzone.classList.remove('drag-over'));
+decompressDropzone.addEventListener('drop', e => {
+  e.preventDefault();
+  decompressDropzone.classList.remove('drag-over');
+  if (e.dataTransfer.files.length > 0) {
+    handleDecompressFile(e.dataTransfer.files[0]);
+  }
+});
+
+async function handleDecompressFile(file) {
+  if (!file) return;
+  decompressStatus.textContent = '';
+  decompressStatus.className = 'status';
+  decompressFileList.innerHTML = '';
+  decompressProgress.style.display = 'block';
+  decompressBar.style.width = '0%';
+  parsedEntries = null;
+
+  try {
+    const buffer = await file.arrayBuffer();
+    decompressBar.style.width = '50%';
+    parsedEntries = parseMyz(buffer);
+    decompressBar.style.width = '100%';
+    renderDecompressList();
+    decompressStatus.textContent = `解析成功！共 ${parsedEntries.length} 个文件，点击「下载」解压并保存。`;
+    decompressStatus.className = 'status success';
+  } catch (err) {
+    decompressStatus.textContent = '解析失败：' + err.message;
+    decompressStatus.className = 'status error';
+  }
+}
+</script>
+</body>
+</html>

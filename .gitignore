@@ -1,0 +1,15 @@
+# LuatOS 官方源码库（本地参考用，不提交）
+LuatOS/
+
+# 构建输出
+build/
+
+# IDE 临时文件
+.cowork-temp/
+
+# CodeArts 工具元数据（本地生成，不提交）
+.arts/
+.merkle-snapshot.json
+# 屏幕设计源文件（本地工作文件，不提交）
+屏幕流程.drawio
+hmi/

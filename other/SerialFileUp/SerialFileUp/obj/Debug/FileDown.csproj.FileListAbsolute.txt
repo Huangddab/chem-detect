@@ -1,0 +1,11 @@
+I:\svncode\upexe\FileDown\obj\Debug\ResolveAssemblyReference.cache
+I:\svncode\upexe\FileDown\obj\Debug\FileDown.csproj.GenerateResource.Cache
+I:\svncode\upexe\FileDown\obj\Debug\FileDown.Properties.Resources.resources
+I:\svncode\upexe\FileDown\obj\Debug\FileDown.MainFrame.resources
+I:\svncode\upexe\FileDown\obj\Debug\FileDown.MyComPortControl.resources
+I:\svncode\upexe\FileDown\bin\Debug\FileDown.exe
+I:\svncode\upexe\FileDown\bin\Debug\FileDown.pdb
+I:\svncode\upexe\FileDown\obj\Debug\FileDown.exe
+I:\svncode\upexe\FileDown\obj\Debug\FileDown.pdb
+I:\svncode\upexe\SerialFileUp\obj\Debug\FileDown.exe
+I:\svncode\upexe\SerialFileUp\obj\Debug\FileDown.pdb
